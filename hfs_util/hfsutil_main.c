@@ -1,24 +1,21 @@
 /*
- * Copyright (c) 1999-2003 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999-2004 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
- * Copyright (c) 1999-2003 Apple Computer, Inc.  All Rights Reserved.
+ * The contents of this file constitute Original Code as defined in and
+ * are subject to the Apple Public Source License Version 1.2 (the
+ * "License").  You may not use this file except in compliance with the
+ * License.  Please obtain a copy of the License at
+ * http://www.apple.com/publicsource and read it before using this file.
  * 
- * This file contains Original Code and/or Modifications of Original Code
- * as defined in and that are subject to the Apple Public Source License
- * Version 2.0 (the 'License'). You may not use this file except in
- * compliance with the License. Please obtain a copy of the License at
- * http://www.opensource.apple.com/apsl/ and read it before using this
- * file.
- * 
- * The Original Code and all software distributed under the License are
- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+ * This Original Code and all software distributed under the License are
+ * distributed on an "AS IS" basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
  * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
- * Please see the License for the specific language governing rights and
- * limitations under the License.
+ * FITNESS FOR A PARTICULAR PURPOSE OR NON-INFRINGEMENT.  Please see the
+ * License for the specific language governing rights and limitations
+ * under the License.
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
@@ -715,8 +712,14 @@ DoProbe(char *deviceNamePtr)
 		}
  
  		/* Preload the encoding converter so mount_hfs can run as an ordinary user. */
- 		if (encoding != kCFStringEncodingMacRoman)
- 			result = load_encoding(encoding);
+ 		if (encoding != kCFStringEncodingMacRoman) {
+ 			if (load_encoding(encoding) != FSUR_IO_SUCCESS) {
+ 				encoding = kCFStringEncodingMacRoman;
+				cfstr = CFStringCreateWithPascalString(kCFAllocatorDefault, mdbPtr->drVN, encoding);
+				_CFStringGetFileSystemRepresentation(cfstr, volnameUTF8, NAME_MAX);
+				CFRelease(cfstr);
+ 			}
+ 		}
  
  	/* get HFS Plus volume name (from Catalog) */
 	} else if ((NXSwapBigShortToHost(volHdrPtr->signature) == kHFSPlusSigWord)  ||
@@ -1863,6 +1866,7 @@ GetCatalogOverflowExtents(int fd, off_t hfsPlusVolumeOffset,
 	off_t offset;
 	u_int32_t nodeSize;
 	u_int32_t leafNode;
+	u_int32_t blockSize;
     BTNodeDescriptor * bTreeNodeDescriptorPtr;
 	HFSPlusExtentDescriptor * extents;
 	size_t listsize;
@@ -1870,14 +1874,15 @@ GetCatalogOverflowExtents(int fd, off_t hfsPlusVolumeOffset,
 	int i;
 	int result;
 
+	blockSize = NXSwapBigLongToHost(volHdrPtr->blockSize);
 	listsize = *catalogExtCount * sizeof(HFSPlusExtentDescriptor);
 	extents = *catalogExtents;
 	offset = (off_t)volHdrPtr->extentsFile.extents[0].startBlock *
-		    (off_t)volHdrPtr->blockSize;
+		    (off_t)blockSize;
 
 	/* Read the header node of the extents B-Tree */
 
-	result = GetBTreeNodeInfo(fd, hfsPlusVolumeOffset, volHdrPtr->blockSize,
+	result = GetBTreeNodeInfo(fd, hfsPlusVolumeOffset, blockSize,
 			kHFSPlusExtentDensity, volHdrPtr->extentsFile.extents,
 		    &nodeSize, &leafNode);
 	if (result != FSUR_IO_SUCCESS || leafNode == 0)
@@ -1899,7 +1904,7 @@ GetCatalogOverflowExtents(int fd, off_t hfsPlusVolumeOffset,
 
 again:
 	result = ReadFile(fd, bufPtr, offset, nodeSize,
-					hfsPlusVolumeOffset, volHdrPtr->blockSize,
+					hfsPlusVolumeOffset, blockSize,
 					kHFSPlusExtentDensity, volHdrPtr->extentsFile.extents);
 	if ( result == FSUR_IO_FAIL ) {
 #if TRACE_HFS_UTIL
@@ -1936,7 +1941,7 @@ again:
 		/* grow list and copy additional extents */
 		listsize += sizeof(HFSPlusExtentRecord);
 		extents = (HFSPlusExtentDescriptor *) realloc(extents, listsize);
-		bcopy(p + k->keyLength + sizeof(u_int16_t),
+		bcopy(p + NXSwapBigShortToHost(k->keyLength) + sizeof(u_int16_t),
 			&extents[*catalogExtCount], sizeof(HFSPlusExtentRecord));
 
 		*catalogExtCount += kHFSPlusExtentDensity;
@@ -2323,7 +2328,7 @@ void GenerateVolumeUUID(VolumeUUID *newVolumeID) {
 	int sysdata;
 	char sysctlstring[128];
 	size_t datalen;
-	struct loadavg sysloadavg;
+	double sysloadavg[3];
 	struct vmtotal sysvmtotal;
 	
 	do {
@@ -2372,10 +2377,8 @@ void GenerateVolumeUUID(VolumeUUID *newVolumeID) {
 		SHA1_Update(&context, sysctlstring, datalen);
 
 		/* The system's load average: */
-		mib[0] = CTL_VM;
-		mib[1] = VM_LOADAVG;
 		datalen = sizeof(sysloadavg);
-		sysctl(mib, 2, &sysloadavg, &datalen, NULL, 0);
+		getloadavg(sysloadavg, 3);
 		SHA1_Update(&context, &sysloadavg, datalen);
 
 		/* The system's VM statistics: */
