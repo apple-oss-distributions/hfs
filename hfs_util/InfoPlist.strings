@@ -16,6 +16,16 @@
 			<key>FSName</key>
 			<string>Mac OS Extended</string>
 		</dict>
+		<key>Journaled HFS+</key>
+		<dict>
+			<key>FSName</key>
+			<string>Mac OS Extended (Journaled)</string>
+		</dict>
+		<key>Case-sensitive HFS+</key>
+		<dict>
+			<key>FSName</key>
+			<string>Mac OS Extended (Case-sensitive/Journaled)</string>
+		</dict>
 	</dict>
 </dict>
 </plist>

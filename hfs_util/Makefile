@@ -12,7 +12,7 @@ NAME = hfs.util
 PROJECTVERSION = 2.8
 PROJECT_TYPE = Tool
 
-CFILES = hfsutil_main.c
+CFILES = hfsutil_main.c hfsutil_jnl.c
 
 OTHERSRCS = Makefile.preamble Makefile Makefile.postamble\
             hfs_CD.fs.tiff hfs_CD.openfs.tiff hfs_FD.fs.tiff\
@@ -25,7 +25,7 @@ MAKEFILEDIR = $(MAKEFILEPATH)/pb_makefiles
 CODE_GEN_STYLE = DYNAMIC
 MAKEFILE = tool.make
 NEXTSTEP_INSTALLDIR = $(SYSTEM_LIBRARY_DIR)/Filesystems/hfs.fs
-LIBS = 
+LIBS = -lcrypto
 DEBUG_LIBS = $(LIBS)
 PROF_LIBS = $(LIBS)
 
