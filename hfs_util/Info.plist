@@ -13,13 +13,49 @@
 	<key>CFBundlePackageType</key>
 	<string>fs  </string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4.1</string>
+	<string>1.4.2</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>1.4</string>
 	<key>FSMediaTypes</key>
 	<dict>
+                <key>Apple_Boot</key>
+                <dict>
+                        <key>FSMediaProperties</key>
+                        <dict>
+                                <key>Content Hint</key>
+                                <string>Apple_Boot</string>
+                                <key>Leaf</key>
+                                <true/>
+                        </dict>
+                        <key>FSProbeArguments</key>
+                        <string>-p</string>
+                        <key>FSProbeExecutable</key>
+                        <string>../../hfs.util</string>
+                        <key>FSProbeOrder</key>
+                        <integer>1000</integer>
+                        <key>autodiskmount</key>
+                        <false/>
+                </dict>
+		<key>426F6F74-0000-11AA-AA11-00306543ECAC</key>
+                <dict>
+                        <key>FSMediaProperties</key>
+                        <dict>
+                                <key>Content Hint</key>
+                                <string>426F6F74-0000-11AA-AA11-00306543ECAC</string>
+                                <key>Leaf</key>
+                                <true/>
+                        </dict>
+                        <key>FSProbeArguments</key>
+                        <string>-p</string>
+                        <key>FSProbeExecutable</key>
+                        <string>../../hfs.util</string>
+                        <key>FSProbeOrder</key>
+                        <integer>1000</integer>
+                        <key>autodiskmount</key>
+                        <false/>
+                </dict>
 		<key>48465300-0000-11AA-AA11-00306543ECAC</key>
 		<dict>
 			<key>FSMediaProperties</key>
