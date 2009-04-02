@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 1999-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -110,6 +110,14 @@
 #define FSUC_UNJNL_RAW 'N'
 #endif
 
+#ifndef FSUC_JNLINFS_RAW
+#define FSUC_JNLINFS_RAW 'e'
+#endif
+
+#ifndef FSUC_EXTJNL_RAW
+#define FSUC_EXTJNL_RAW 'E'
+#endif
+
 #ifndef FSUC_JNLINFO
 #define FSUC_JNLINFO 'I'
 #endif
@@ -149,17 +157,17 @@ int gJournalSize = 0;
 
 
 struct FinderAttrBuf {
-	unsigned long info_length;
-	unsigned long finderinfo[8];
+	u_int32_t info_length;
+	u_int32_t finderinfo[8];
 };
 
 
 #define VOLUMEUUIDVALUESIZE 2
 typedef union VolumeUUID {
-	unsigned long value[VOLUMEUUIDVALUESIZE];
+	u_int32_t value[VOLUMEUUIDVALUESIZE];
 	struct {
-		unsigned long high;
-		unsigned long low;
+		u_int32_t high;
+		u_int32_t low;
 	} v;
 } VolumeUUID;
 
@@ -184,7 +192,7 @@ int CloseVolumeStatusDB(VolumeStatusDBHandle DBHandle);
 /* ************************************ P R O T O T Y P E S *************************************** */
 static void	DoDisplayUsage( const char * argv[] );
 static int	DoMount( char * theDeviceNamePtr, const char * theMountPointPtr, boolean_t isLocked, boolean_t isSetuid, boolean_t isDev );
-static int 	DoProbe( char * theDeviceNamePtr );
+static int 	DoProbe( char * rawDeviceNamePtr, char * blockDeviceNamePtr );
 static int 	DoUnmount( const char * theMountPointPtr );
 static int	DoGetUUIDKey( const char * theDeviceNamePtr );
 static int	DoChangeUUIDKey( const char * theDeviceNamePtr );
@@ -195,6 +203,7 @@ extern int  DoMakeJournaled( const char * volNamePtr, int journalSize );  // XXX
 extern int  DoUnJournal( const char * volNamePtr );      // XXXdbg
 extern int  DoGetJournalInfo( const char * volNamePtr );
 extern int  RawDisableJournaling( const char *devname );
+extern int  SetJournalInFSState( const char *devname, int journal_in_fs);
 
 static int	ParseArgs( int argc, const char * argv[], const char ** actionPtr, const char ** mountPointPtr, boolean_t * isEjectablePtr, boolean_t * isLockedPtr, boolean_t * isSetuidPtr, boolean_t * isDevPtr );
 
@@ -244,8 +253,8 @@ static unsigned int __CFStringGetDefaultEncodingForHFSUtil() {
         char buffer[MAXPATHLEN + 1];
         int fd;
 
-        strcpy(buffer, passwdp->pw_dir);
-        strcat(buffer, __kCFUserEncodingFileName);
+        strlcpy(buffer, passwdp->pw_dir, sizeof(buffer));
+        strlcat(buffer, __kCFUserEncodingFileName, sizeof(buffer));
 
         if ((fd = open(buffer, O_RDONLY, 0)) > 0) {
             size_t readSize;
@@ -341,7 +350,7 @@ static int load_encoding(CFStringEncoding encoding)
 		return FSUR_LOADERR;
 	}
 	
-	sprintf(kmodfile, "%sHFS_Mac%s.kext", ENCODING_MODULE_PATH, encodingName);
+	snprintf(kmodfile, sizeof(kmodfile), "%sHFS_Mac%s.kext", ENCODING_MODULE_PATH, encodingName);
 	if (stat(kmodfile, &sb) == -1)
 	{
 		/* We recognized the encoding, but couldn't find the KEXT */
@@ -407,14 +416,14 @@ int main (int argc, const char *argv[])
     --   "/dev/disk0s2"
     */
 
-    sprintf(rawDeviceName, "/dev/r%s", argv[2]);
-    sprintf(blockDeviceName, "/dev/%s", argv[2]);
+    snprintf(rawDeviceName, sizeof(rawDeviceName), "/dev/r%s", argv[2]);
+    snprintf(blockDeviceName, sizeof(blockDeviceName), "/dev/%s", argv[2]);
 
     /* call the appropriate routine to handle the given action argument after becoming root */
 
     switch( * actionPtr ) {
         case FSUC_PROBE:
-            result = DoProbe(rawDeviceName);
+            result = DoProbe(rawDeviceName, blockDeviceName);
             break;
 
         case FSUC_MOUNT:
@@ -454,6 +463,19 @@ int main (int argc, const char *argv[])
 			
 		case FSUC_UNJNL_RAW:
 			result = RawDisableJournaling( argv[2] );
+			break;
+			
+		case FSUC_JNLINFS_RAW:
+			// argv[2] has the device for the external journal.  however
+			// we don't need it so we ignore it and just pass argv[3]
+			// which is the hfs volume whose state we're going to change
+			//
+			result = SetJournalInFSState( argv[3], 1 );
+			break;
+			
+		case FSUC_EXTJNL_RAW:
+			// see the comment for FSUC_JNLINFS_RAW
+			result = SetJournalInFSState( argv[3], 0 );
 			break;
 			
 		case FSUC_JNLINFO:
@@ -583,7 +605,7 @@ DoMount(char *deviceNamePtr, const char *mountPointPtr, boolean_t isLocked, bool
 #else
 		encoding = CFStringGetSystemEncoding();
 #endif
-		sprintf(encodeopt, "-e=%d", (int)encoding);
+		snprintf(encodeopt, sizeof(encodeopt), "-e=%d", (int)encoding);
 #if TRACE_HFS_UTIL
 		fprintf(stderr, "hfs.util: %s %s -o -x -o %s -o %s -o -u=unknown,-g=unknown,-m=0777 -t %s %s %s ...\n",
 							gMountCommand, isLockedstr, encodeopt, permissionsOption, gHFS_FS_NAME, deviceNamePtr, mountPointPtr);
@@ -653,17 +675,64 @@ DoUnmount(const char * theMountPointPtr)
 } /* DoUnmount */
 
 
+/*
+	PrintVolumeNameAttr
+	
+	Get the volume name of the volume mounted at "path".  Print that volume
+	name to standard out.
+
+	Returns: FSUR_RECOGNIZED, FSUR_IO_FAIL
+*/
+struct VolumeNameBuf {
+	u_int32_t	info_length;
+	attrreference_t	name_ref;
+	char		buffer[1024];
+};
+
+static int
+PrintVolumeNameAttr(const char *path)
+{
+	struct attrlist alist;
+	struct VolumeNameBuf volNameInfo;
+	int result;
+
+	/* Set up the attrlist structure to get the volume's Finder Info */
+	alist.bitmapcount = 5;
+	alist.reserved = 0;
+	alist.commonattr = 0;
+	alist.volattr = ATTR_VOL_INFO | ATTR_VOL_NAME;
+	alist.dirattr = 0;
+	alist.fileattr = 0;
+	alist.forkattr = 0;
+
+	/* Get the Finder Info */
+	result = getattrlist(path, &alist, &volNameInfo, sizeof(volNameInfo), 0);
+	if (result) {
+		result = FSUR_IO_FAIL;
+		goto Err_Exit;
+	}
+
+	/* Print the name to standard out */
+	printf("%.*s", (int) volNameInfo.name_ref.attr_length, ((char *) &volNameInfo.name_ref) + volNameInfo.name_ref.attr_dataoffset);
+	result = FSUR_RECOGNIZED;
+
+Err_Exit:
+	return result;
+}
+
+
 /* ******************************************* DoProbe **********************************************
 Purpose -
-    This routine will open the given raw device and check to make sure there is media that looks
-    like an HFS.
+    This routine will open the given device and check to make sure there is media that looks
+    like an HFS.  If it is HFS, then print the volume name to standard output.
 Input -
-    theDeviceNamePtr - pointer to the device name (full path, like /dev/disk0s2).
+    rawDeviceNamePtr - pointer to the full path of the raw device (like /dev/rdisk0s2).
+    blockDeviceNamePtr - pointer to the full path of the non-raw device (like /dev/disk0s2).
 Output -
     returns FSUR_RECOGNIZED if we can handle the media else one of the FSUR_xyz error codes.
 *************************************************************************************************** */
 static int
-DoProbe(char *deviceNamePtr)
+DoProbe(char *rawDeviceNamePtr, char *blockDeviceNamePtr)
 {
 	int result = FSUR_UNRECOGNIZED;
 	int fd = 0;
@@ -672,6 +741,29 @@ DoProbe(char *deviceNamePtr)
 	HFSPlusVolumeHeader * volHdrPtr;
 	u_char volnameUTF8[NAME_MAX+1];
 
+	/*
+	 * Determine if there is a volume already mounted from this device.  If
+	 * there is, and it is HFS, then we need to get the volume name via
+	 * getattrlist.
+	 *
+	 * NOTE: We're using bufPtr to hold a pointer to a path.
+	 */
+	bufPtr = NULL;
+	result = GetHFSMountPoint(blockDeviceNamePtr, &bufPtr);
+	if (result != FSUR_IO_SUCCESS) {
+		goto Err_Exit;
+	}
+	if (bufPtr != NULL) {
+		/* There is an HFS volume mounted from the device. */
+		result = PrintVolumeNameAttr(bufPtr);
+		goto Err_Exit;
+	}
+	
+	/*
+	 * If we get here, there is no volume mounted from this device, so
+	 * go probe the raw device directly.
+	 */
+	
 	bufPtr = (char *)malloc(HFS_BLOCK_SIZE);
 	if ( ! bufPtr ) {
 		result = FSUR_UNRECOGNIZED;
@@ -681,7 +773,7 @@ DoProbe(char *deviceNamePtr)
 	mdbPtr = (HFSMasterDirectoryBlock *) bufPtr;
 	volHdrPtr = (HFSPlusVolumeHeader *) bufPtr;
 
-	fd = open( deviceNamePtr, O_RDONLY, 0 );
+	fd = open( rawDeviceNamePtr, O_RDONLY, 0 );
 	if( fd <= 0 ) {
 		result = FSUR_IO_FAIL;
 		goto Return;
@@ -718,6 +810,10 @@ DoProbe(char *deviceNamePtr)
 
 		cfstr = CFStringCreateWithPascalString(kCFAllocatorDefault,
 			    mdbPtr->drVN, encoding);
+		if (cfstr == NULL) {
+			result = FSUR_INVAL;
+			goto Return;
+		}
 		cfOK = _CFStringGetFileSystemRepresentation(cfstr, volnameUTF8, NAME_MAX);
 		CFRelease(cfstr);
 
@@ -764,14 +860,6 @@ DoProbe(char *deviceNamePtr)
 	}
 
 	if (FSUR_IO_SUCCESS == result) {
-		unsigned char *s;
-		
-		/* Change slashes to colons in the volume name */
-		for (s=volnameUTF8; *s; ++s) {
-			if (*s == '/')
-				*s = ':';
-		}
-
 		/* Print the volume name to standard output */
 		write(1, volnameUTF8, strlen((char *)volnameUTF8));
 		result = FSUR_RECOGNIZED;
@@ -784,7 +872,7 @@ Return:
 
 	if (fd > 0)
 		close(fd);
-
+Err_Exit:
 	return result;
 
 } /* DoProbe */
@@ -1103,6 +1191,16 @@ ParseArgs(int argc, const char *argv[], const char ** actionPtr,
 			doLengthCheck = 0;
 			break;
 
+		case FSUC_JNLINFS_RAW:
+			index = 0;
+			doLengthCheck = 0;
+			break;
+
+		case FSUC_EXTJNL_RAW:
+			index = 0;
+			doLengthCheck = 0;
+			break;
+
 		case FSUC_JNLINFO:
 			index = 0;
 			doLengthCheck = 0;
@@ -1197,6 +1295,8 @@ DoDisplayUsage(const char *argv[])
 	printf("       -%c (Make a file system journaled)\n", FSUC_MKJNL);
 	printf("       -%c (Turn off journaling on a file system)\n", FSUC_UNJNL);
 	printf("       -%c (Turn off journaling on a raw device)\n", FSUC_UNJNL_RAW);
+	printf("       -%c (Disable use of an external journal on a raw device)\n", FSUC_JNLINFS_RAW);
+	printf("       -%c (Enable the use of an external journal on a raw device)\n", FSUC_EXTJNL_RAW);
 	printf("       -%c (Get size & location of journaling on a file system)\n", FSUC_JNLINFO);
     printf("device_arg:\n");
     printf("       device we are acting upon (for example, 'disk0s2')\n");
@@ -1804,6 +1904,16 @@ GetNameFromHFSPlusVolumeStartingAt(int fd, off_t hfsPlusVolumeOffset, unsigned c
             goto Return;
         }
 
+	if ((OSSwapBigToHostInt16(k->nodeName.length) >
+		(sizeof(k->nodeName.unicode) / sizeof(k->nodeName.unicode[0]))) ||
+		OSSwapBigToHostInt16(k->nodeName.length) < 0) {
+		result = FSUR_IO_FAIL;
+#if TRACE_HFS_UTIL
+		fprintf(stderr, "hfs.util: ERROR:  k->nodeName.length is a bad size (%d)\n", OSSwapBigToHostInt16(k->nodeName.length));
+#endif
+		goto Return;
+	}
+
 	/* Extract the name of the root directory */
 
 	{
@@ -1845,12 +1955,10 @@ Return:
 } /* GetNameFromHFSPlusVolumeStartingAt */
 
 
-#pragma options align=mac68k
 typedef struct {
 	BTNodeDescriptor	node;
 	BTHeaderRec		header;
-} HeaderRec, *HeaderPtr;
-#pragma options align=reset
+} __attribute__((aligned(2), packed)) HeaderRec, *HeaderPtr;
 
 /*
  --	
@@ -2461,10 +2569,10 @@ void GenerateVolumeUUID(VolumeUUID *newVolumeID) {
 void ConvertVolumeUUIDStringToUUID(const char *UUIDString, VolumeUUID *volumeID) {
 	int i;
 	char c;
-	unsigned long nextdigit;
-	unsigned long high = 0;
-	unsigned long low = 0;
-	unsigned long carry;
+	u_int32_t nextdigit;
+	u_int32_t high = 0;
+	u_int32_t low = 0;
+	u_int32_t carry;
 	
 	for (i = 0; (i < VOLUMEUUIDLENGTH) && ((c = UUIDString[i]) != (char)0) ; ++i) {
 		if ((c >= '0') && (c <= '9')) {
