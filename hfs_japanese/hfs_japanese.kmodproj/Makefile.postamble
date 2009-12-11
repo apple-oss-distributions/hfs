@@ -33,8 +33,8 @@
 #  ALL_LFLAGS:  flags to pass when processing .l (lex) files
 #
 #  NAME: name of application, bundle, subproject, palette, etc.
-#  LANGUAGE: langage in which the project is written (default "English")
-#  LOCAL_RESOURCES: localized resources (e.g. nib's, images) of project
+#  LANGUAGES: langages in which the project is written (default "English")
+#  English_RESOURCES: localized resources (e.g. nib's, images) of project
 #  GLOBAL_RESOURCES: non-localized resources of project
 #
 #  SRCROOT:  base directory in which to place the new source files
