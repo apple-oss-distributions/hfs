@@ -40,8 +40,6 @@
 #    OTHER_YFLAGS, LOCAL_YFLAGS:  additional flags passed to yacc
 #    OTHER_LFLAGS, LOCAL_LFLAGS:  additional flags passed to lex
 
-OTHER_CFLAGS =  
-
 # These variables provide hooks enabling you to add behavior at almost every 
 # stage of the make:
 #
@@ -79,20 +77,24 @@ OTHER_CFLAGS =
 # Library-related variables:
 #    PUBLIC_HEADER_DIR:  Determines where public exported header files
 #	should be installed.  Do not include $(DSTROOT) in this value --
-#	it is prefixed automatically.
+#	it is prefixed automatically.  For library projects you should
+#       set this to something like /Developer/Headers/$(NAME).  Do not set
+#       this variable for framework projects unless you do not want the
+#       header files included in the framework.
 #    PRIVATE_HEADER_DIR:  Determines where private exported header files
 #  	should be installed.  Do not include $(DSTROOT) in this value --
 #	it is prefixed automatically.
 #    LIBRARY_STYLE:  This may be either STATIC or DYNAMIC, and determines
 #  	whether the libraries produced are statically linked when they
-#	are used or if they are dynamically loadable. <<default?>>
+#	are used or if they are dynamically loadable. This defaults to
+#       DYNAMIC.
 #    LIBRARY_DLL_INSTALLDIR:  On Windows platforms, this variable indicates
 #	where to put the library's DLL.  This variable defaults to 
 #	$(INSTALLDIR)/../Executables
 #
 #    INSTALL_AS_USER: owner of the intalled products (default root)
 #    INSTALL_AS_GROUP: group of the installed products (default wheel)
-#    INSTALL_PERMISSION: permissions of the installed product (default o+rX)
+#    INSTALL_PERMISSIONS: permissions of the installed product (default o+rX)
 #
 #    OTHER_RECURSIVE_VARIABLES: The names of variables which you want to be
 #  	passed on the command line to recursive invocations of make.  Note that
@@ -123,3 +125,13 @@ OTHER_CFLAGS =
 # This definition will suppress stripping of debug symbols when an executable
 # is installed.  By default it is YES.
 # STRIP_ON_INSTALL = NO
+
+# Uncomment to suppress generation of a KeyValueCoding index when installing 
+# frameworks (This index is used by WOB and IB to determine keys available
+# for an object).  Set to YES by default.
+# PREINDEX_FRAMEWORK = NO
+
+# Change this definition to install projects somewhere other than the
+# standard locations.  NEXT_ROOT defaults to "C:/Apple" on Windows systems
+# and "" on other systems.
+DSTROOT = $(HOME)

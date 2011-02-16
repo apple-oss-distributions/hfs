@@ -77,20 +77,24 @@
 # Library-related variables:
 #    PUBLIC_HEADER_DIR:  Determines where public exported header files
 #	should be installed.  Do not include $(DSTROOT) in this value --
-#	it is prefixed automatically.
+#	it is prefixed automatically.  For library projects you should
+#       set this to something like /Developer/Headers/$(NAME).  Do not set
+#       this variable for framework projects unless you do not want the
+#       header files included in the framework.
 #    PRIVATE_HEADER_DIR:  Determines where private exported header files
 #  	should be installed.  Do not include $(DSTROOT) in this value --
 #	it is prefixed automatically.
 #    LIBRARY_STYLE:  This may be either STATIC or DYNAMIC, and determines
 #  	whether the libraries produced are statically linked when they
-#	are used or if they are dynamically loadable. <<default?>>
+#	are used or if they are dynamically loadable. This defaults to
+#       DYNAMIC.
 #    LIBRARY_DLL_INSTALLDIR:  On Windows platforms, this variable indicates
 #	where to put the library's DLL.  This variable defaults to 
 #	$(INSTALLDIR)/../Executables
 #
 #    INSTALL_AS_USER: owner of the intalled products (default root)
 #    INSTALL_AS_GROUP: group of the installed products (default wheel)
-#    INSTALL_PERMISSION: permissions of the installed product (default o+rX)
+#    INSTALL_PERMISSIONS: permissions of the installed product (default o+rX)
 #
 #    OTHER_RECURSIVE_VARIABLES: The names of variables which you want to be
 #  	passed on the command line to recursive invocations of make.  Note that
@@ -111,17 +115,23 @@
 #    OTHER_SOURCEFILES: other source files maintained by .pre/postamble
 #    OTHER_GARBAGE: additional files to be removed by `make clean'
 
-#OTHER_LIBS += -lkernload
-
 # Set this to YES if you don't want a final libtool call for a library/framework.
 #    BUILD_OFILES_LIST_ONLY
 
 # To include a version string, project source must exist in a directory named 
 # $(NAME).%d[.%d][.%d] and the following line must be uncommented.
-OTHER_GENERATED_OFILES = $(VERS_OFILE)
+# OTHER_GENERATED_OFILES = $(VERS_OFILE)
 
 # This definition will suppress stripping of debug symbols when an executable
 # is installed.  By default it is YES.
 # STRIP_ON_INSTALL = NO
 
-AFTER_INSTALL += buildContentsDir
+# Uncomment to suppress generation of a KeyValueCoding index when installing 
+# frameworks (This index is used by WOB and IB to determine keys available
+# for an object).  Set to YES by default.
+# PREINDEX_FRAMEWORK = NO
+
+# Change this definition to install projects somewhere other than the
+# standard locations.  NEXT_ROOT defaults to "C:/Apple" on Windows systems
+# and "" on other systems.
+DSTROOT = $(HOME)
