@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist SYSTEM "file://localhost/System/Library/DTDs/PropertyList.dtd">
-<plist version="0.9">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
@@ -13,11 +13,13 @@
 	<key>CFBundlePackageType</key>
 	<string>fs  </string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.6.1</string>
+	<string>$HFS_VERSION</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleGetInfoString</key>
+	<string>$HFS_COPYRIGHT_INFO_STRING</string>
 	<key>CFBundleVersion</key>
-	<string>1.6</string>
+	<string>$HFS_VERSION</string>
 	<key>FSMediaTypes</key>
 	<dict>
 		<key>Apple_Boot</key>
@@ -32,7 +34,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>1000</integer>
 			<key>autodiskmount</key>
@@ -50,7 +52,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>1000</integer>
 			<key>autodiskmount</key>
@@ -68,7 +70,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>1000</integer>
 		</dict>
@@ -84,7 +86,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>1000</integer>
 		</dict>
@@ -100,7 +102,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>1000</integer>
 		</dict>
@@ -116,7 +118,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>2000</integer>
 		</dict>
@@ -132,7 +134,7 @@
 			<key>FSProbeArguments</key>
 			<string>-p</string>
 			<key>FSProbeExecutable</key>
-			<string>../../hfs.util</string>
+			<string>hfs.util</string>
 			<key>FSProbeOrder</key>
 			<integer>2000</integer>
 		</dict>
@@ -144,7 +146,7 @@
 			<key>FSMountArguments</key>
 			<string></string>
 			<key>FSMountExecutable</key>
-			<string>../../../../../../sbin/mount_hfs</string>
+			<string>mount_hfs</string>
 			<key>FSName</key>
 			<string>Mac OS Standard</string>
 			<key>FSSubType</key>
@@ -154,11 +156,11 @@
 			<key>FSXMLOutputArgument</key>
 			<string>-x</string>
 			<key>FSRepairExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSVerificationArguments</key>
 			<string>-n</string>
 			<key>FSVerificationExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 		</dict>
 		<key>HFS+</key>
 		<dict>
@@ -167,7 +169,7 @@
 			<key>FSFormatContentMask</key>
 			<string>Apple_HFS</string>
 			<key>FSFormatExecutable</key>
-			<string>../../../../../../sbin/newfs_hfs</string>
+			<string>newfs_hfs</string>
 			<key>FSFormatMinimumSize</key>
 			<integer>524288</integer>
 			<key>FSFormatMaximumSize</key>
@@ -175,7 +177,7 @@
 			<key>FSMountArguments</key>
 			<string></string>
 			<key>FSMountExecutable</key>
-			<string>../../../../../../sbin/mount_hfs</string>
+			<string>mount_hfs</string>
 			<key>FSName</key>
 			<string>Mac OS Extended</string>
 			<key>FSSubType</key>
@@ -185,11 +187,11 @@
 			<key>FSXMLOutputArgument</key>
 			<string>-x</string>
 			<key>FSRepairExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSVerificationArguments</key>
 			<string>-fn</string>
 			<key>FSVerificationExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 		</dict>
 		<key>Journaled HFS+</key>
 		<dict>
@@ -198,7 +200,7 @@
 			<key>FSFormatContentMask</key>
 			<string>Apple_HFS</string>
 			<key>FSFormatExecutable</key>
-			<string>../../../../../../sbin/newfs_hfs</string>
+			<string>newfs_hfs</string>
 			<key>FSFormatMinimumSize</key>
 			<integer>9437184</integer>
 			<key>FSFormatMaximumSize</key>
@@ -206,7 +208,7 @@
 			<key>FSMountArguments</key>
 			<string></string>
 			<key>FSMountExecutable</key>
-			<string>../../../../../../sbin/mount_hfs</string>
+			<string>mount_hfs</string>
 			<key>FSName</key>
 			<string>Mac OS Extended (Journaled)</string>
 			<key>FSSubType</key>
@@ -216,16 +218,15 @@
 			<key>FSXMLOutputArgument</key>
 			<string>-x</string>
 			<key>FSRepairExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSVerificationArguments</key>
 			<string>-fn</string>
 			<key>FSVerificationExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSLiveVerificationArguments</key>
 			<string>-l</string>
 			<key>FSCoreStorageEncryptionName</key>
-				<string>Mac OS Extended (Journaled, Encrypted)</string>
-
+			<string>Mac OS Extended (Journaled, Encrypted)</string>
 		</dict>
 		<key>Case-sensitive HFS+</key>
 		<dict>
@@ -234,7 +235,7 @@
 			<key>FSFormatContentMask</key>
 			<string>Apple_HFSX</string>
 			<key>FSFormatExecutable</key>
-			<string>../../../../../../sbin/newfs_hfs</string>
+			<string>newfs_hfs</string>
 			<key>FSFormatMinimumSize</key>
 			<integer>4194304</integer>
 			<key>FSFormatMaximumSize</key>
@@ -242,7 +243,7 @@
 			<key>FSMountArguments</key>
 			<string></string>
 			<key>FSMountExecutable</key>
-			<string>../../../../../../sbin/mount_hfs</string>
+			<string>mount_hfs</string>
 			<key>FSName</key>
 			<string>Mac OS Extended (Case-sensitive)</string>
 			<key>FSSubType</key>
@@ -252,11 +253,11 @@
 			<key>FSXMLOutputArgument</key>
 			<string>-x</string>
 			<key>FSRepairExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSVerificationArguments</key>
 			<string>-fn</string>
 			<key>FSVerificationExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 		</dict>
 		<key>Case-sensitive Journaled HFS+</key>
 		<dict>
@@ -265,7 +266,7 @@
 			<key>FSFormatContentMask</key>
 			<string>Apple_HFSX</string>
 			<key>FSFormatExecutable</key>
-			<string>../../../../../../sbin/newfs_hfs</string>
+			<string>newfs_hfs</string>
 			<key>FSFormatMinimumSize</key>
 			<integer>9437184</integer>
 			<key>FSFormatMaximumSize</key>
@@ -273,7 +274,7 @@
 			<key>FSMountArguments</key>
 			<string></string>
 			<key>FSMountExecutable</key>
-			<string>../../../../../../sbin/mount_hfs</string>
+			<string>mount_hfs</string>
 			<key>FSName</key>
 			<string>Mac OS Extended (Case-sensitive, Journaled)</string>
 			<key>FSSubType</key>
@@ -283,15 +284,15 @@
 			<key>FSXMLOutputArgument</key>
 			<string>-x</string>
 			<key>FSRepairExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSVerificationArguments</key>
 			<string>-fn</string>
 			<key>FSVerificationExecutable</key>
-			<string>../../../../../../sbin/fsck_hfs</string>
+			<string>fsck_hfs</string>
 			<key>FSLiveVerificationArguments</key>
 			<string>-l</string>
 			<key>FSCoreStorageEncryptionName</key>
-				<string>Mac OS Extended (Case-sensitive, Journaled, Encrypted)</string>
+			<string>Mac OS Extended (Case-sensitive, Journaled, Encrypted)</string>
 		</dict>
 	</dict>
 </dict>
