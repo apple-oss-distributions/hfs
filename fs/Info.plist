@@ -161,6 +161,12 @@
 			<string>-n</string>
 			<key>FSVerificationExecutable</key>
 			<string>fsck_hfs</string>
+			<key>FSfileObjectsAreCasePreserving</key>
+			<true/>
+			<key>FSfileObjectsAreCaseSensitive</key>
+			<false/>
+			<key>FSvolumeNameIsCasePreserving</key>
+			<true/>
 		</dict>
 		<key>HFS+</key>
 		<dict>
@@ -192,6 +198,12 @@
 			<string>-fn</string>
 			<key>FSVerificationExecutable</key>
 			<string>fsck_hfs</string>
+			<key>FSfileObjectsAreCasePreserving</key>
+			<true/>
+			<key>FSfileObjectsAreCaseSensitive</key>
+			<false/>
+			<key>FSvolumeNameIsCasePreserving</key>
+			<true/>
 		</dict>
 		<key>Journaled HFS+</key>
 		<dict>
@@ -225,8 +237,16 @@
 			<string>fsck_hfs</string>
 			<key>FSLiveVerificationArguments</key>
 			<string>-l</string>
+			<key>FSEncryptionName</key>
+			<string>Mac OS Extended (Journaled, Encrypted)</string>
 			<key>FSCoreStorageEncryptionName</key>
 			<string>Mac OS Extended (Journaled, Encrypted)</string>
+			<key>FSfileObjectsAreCasePreserving</key>
+			<true/>
+			<key>FSfileObjectsAreCaseSensitive</key>
+			<false/>
+			<key>FSvolumeNameIsCasePreserving</key>
+			<true/>
 		</dict>
 		<key>Case-sensitive HFS+</key>
 		<dict>
@@ -258,6 +278,12 @@
 			<string>-fn</string>
 			<key>FSVerificationExecutable</key>
 			<string>fsck_hfs</string>
+			<key>FSfileObjectsAreCasePreserving</key>
+			<true/>
+			<key>FSfileObjectsAreCaseSensitive</key>
+			<true/>
+			<key>FSvolumeNameIsCasePreserving</key>
+			<true/>
 		</dict>
 		<key>Case-sensitive Journaled HFS+</key>
 		<dict>
@@ -291,8 +317,16 @@
 			<string>fsck_hfs</string>
 			<key>FSLiveVerificationArguments</key>
 			<string>-l</string>
+			<key>FSEncryptionName</key>
+			<string>Mac OS Extended (Case-sensitive, Journaled, Encrypted)</string>
 			<key>FSCoreStorageEncryptionName</key>
 			<string>Mac OS Extended (Case-sensitive, Journaled, Encrypted)</string>
+			<key>FSfileObjectsAreCasePreserving</key>
+			<true/>
+			<key>FSfileObjectsAreCaseSensitive</key>
+			<true/>
+			<key>FSvolumeNameIsCasePreserving</key>
+			<true/>
 		</dict>
 	</dict>
 </dict>

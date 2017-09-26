@@ -211,7 +211,18 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 	int lockflags;
 	u_int32_t dirchg = 0;
 	int reachedeof = 0;
-
+	int internal_actualcount;
+	int internal_eofflag;
+	
+	/* Lets makse sure we have something assign to actualcount always, min change required */
+	if (actualcount == NULL) {
+		actualcount = &internal_actualcount;
+	}
+	/* Lets makse sure we have something assign to eofflag always, min change required */
+	if (eofflag == NULL) {
+		eofflag = &internal_eofflag;
+	}
+	
 	*(actualcount) = 0;
 	*(eofflag) = 0;
 
@@ -514,7 +525,7 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 	 * Do not use the valence as a way to determine if we hit EOF, since
 	 * it can be wrong.  Use the catalog's output only.
 	 */
-	if ((*(eofflag) == 0) && (lastdescp != NULL) && (lastdescp->cd_nameptr != NULL)) {
+	if ((*(eofflag) == 0) && (lastdescp != NULL)) {
 
 		/* Remember last entry */
 		if ((dirhint->dh_desc.cd_flags & CD_HASBUF) &&
@@ -522,10 +533,15 @@ hfs_readdirattr_internal(struct vnode *dvp, struct attrlist *alist,
 			dirhint->dh_desc.cd_flags &= ~CD_HASBUF;
 			vfs_removename((const char *)dirhint->dh_desc.cd_nameptr);
 		}
-		dirhint->dh_desc.cd_namelen = lastdescp->cd_namelen;
-		dirhint->dh_desc.cd_nameptr = (const u_int8_t *)
-		vfs_addname((const char *)lastdescp->cd_nameptr, lastdescp->cd_namelen, 0, 0);
-		dirhint->dh_desc.cd_flags |= CD_HASBUF;
+		if (lastdescp->cd_nameptr != NULL) {
+			dirhint->dh_desc.cd_namelen = lastdescp->cd_namelen;
+			dirhint->dh_desc.cd_nameptr = (const u_int8_t *)
+			vfs_addname((const char *)lastdescp->cd_nameptr, lastdescp->cd_namelen, 0, 0);
+			dirhint->dh_desc.cd_flags |= CD_HASBUF;
+		} else {
+			dirhint->dh_desc.cd_namelen = 0;
+			dirhint->dh_desc.cd_nameptr = NULL;
+		}
 		dirhint->dh_index = index - 1;
 		dirhint->dh_desc.cd_cnid = lastdescp->cd_cnid;
 		dirhint->dh_desc.cd_hint = lastdescp->cd_hint;
@@ -1123,7 +1139,10 @@ hfs_attrblksize(struct attrlist *attrlist)
 
 	hfs_assert((attrlist->fileattr & ~ATTR_FILE_VALIDMASK) == 0);
 
-	hfs_assert((attrlist->forkattr & ~ATTR_FORK_VALIDMASK) == 0);
+	// disable this because it will break the simulator/build machines each
+	// time a new _CMNEXT_ bit is added
+	// hfs_assert(((attrlist->forkattr & ~ATTR_FORK_VALIDMASK) == 0) ||
+	// 	((attrlist->forkattr & ~ATTR_CMNEXT_VALIDMASK) == 0));
 
 	size = 0;
 	
@@ -1265,9 +1284,10 @@ get_vattr_data_for_attrs(struct attrlist *alp, struct vnode_attr *vap,
     struct cat_attr *atrp, struct cat_fork *datafork, struct cat_fork *rsrcfork,
     vfs_context_t ctx)
 {
-	if (alp->commonattr)
+	if (alp->commonattr || alp->forkattr) {
 		vattr_data_for_common_attrs(alp, vap, hfsmp, vp, descp, atrp,
-		ctx);
+		    ctx);
+	}
 
 	if (alp->dirattr && S_ISDIR(atrp->ca_mode))
 		vattr_data_for_dir_attrs(alp, vap, hfsmp, vp, descp, atrp);
@@ -1379,9 +1399,11 @@ vattr_data_for_common_attrs( struct attrlist *alp, struct vnode_attr *vap,
 	 * The stat call (getattr) will always return the c_fileid
 	 * and Carbon APIs, which are hardlink-ignorant, will always
 	 * receive the c_cnid (from getattrlist).
+	 *
+	 * Forkattrs are now repurposed for Common Extended Attributes.
 	 */
-	if ((ATTR_CMN_OBJID & attr) ||
-	    (ATTR_CMN_OBJPERMANENTID & attr)) {
+	if ((ATTR_CMN_OBJID & attr) || (ATTR_CMN_OBJPERMANENTID & attr) ||
+	    alp->forkattr & ATTR_CMNEXT_LINKID) {
 		vap->va_linkid = cdp->cd_cnid;
 		VATTR_SET_SUPPORTED(vap, va_linkid);
 	}

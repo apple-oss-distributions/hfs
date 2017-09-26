@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 1999-2017 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -479,6 +479,10 @@ hfs_mount(struct mount *mp, vnode_t devvp, user_addr_t data, vfs_context_t conte
 		}
 
 	} else /* not an update request */ {
+		if (devvp == NULL) {
+			retval = EINVAL;
+			goto out;
+		}
 		/* Set the mount flag to indicate that we support volfs  */
 		vfs_setflags(mp, (u_int64_t)((unsigned int)MNT_DOVOLFS));
 
@@ -1129,11 +1133,6 @@ void hfs_scan_blocks (struct hfsmount *hfsmp) {
 
 }
 
-static int hfs_root_unmounted_cleanly = 0;
-
-SYSCTL_DECL(_vfs_generic);
-HFS_SYSCTL(INT, _vfs_generic, OID_AUTO, root_unmounted_cleanly, CTLFLAG_RD, &hfs_root_unmounted_cleanly, 0, "Root filesystem was unmounted cleanly");
-
 /*
  * Common code for mount and mountroot
  */
@@ -1628,8 +1627,8 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 				goto error_exit;
 		}
 
-		if (isroot) {
-			hfs_root_unmounted_cleanly = ((SWAP_BE32(vhp->attributes) & kHFSVolumeUnmountedMask) != 0);
+		if (isroot && ((SWAP_BE32(vhp->attributes) & kHFSVolumeUnmountedMask) != 0)) {
+			vfs_set_root_unmounted_cleanly();
 		}
 
 		/*
@@ -1886,10 +1885,11 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 		/*
 		 * Set the free space warning levels for a non-root volume:
 		 *
-		 * Set the "danger" limit to 1% of the volume size or 100MB, whichever
-		 * is less.  Set the "warning" limit to 2% of the volume size or 150MB,
-		 * whichever is less.  And last, set the "desired" freespace level to
-		 * to 3% of the volume size or 200MB, whichever is less.
+		 * Set the "danger" limit to 1% of the volume size or 150MB, whichever is less.
+		 * Set the "warning" limit to 2% of the volume size or 500MB, whichever is less.
+		 * Set the "near warning" limit to 10% of the volume size or 1GB, whichever is less.
+		 * And last, set the "desired" freespace level to to 12% of the volume size or 1.2GB,
+		 * whichever is less.
 		 */
 		hfsmp->hfs_freespace_notify_dangerlimit =
 			MIN(HFS_VERYLOWDISKTRIGGERLEVEL / HFSTOVCB(hfsmp)->blockSize,
@@ -1897,6 +1897,9 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 		hfsmp->hfs_freespace_notify_warninglimit =
 			MIN(HFS_LOWDISKTRIGGERLEVEL / HFSTOVCB(hfsmp)->blockSize,
 				(HFSTOVCB(hfsmp)->totalBlocks / 100) * HFS_LOWDISKTRIGGERFRACTION);
+		hfsmp->hfs_freespace_notify_nearwarninglimit =
+			MIN(HFS_NEARLOWDISKTRIGGERLEVEL / HFSTOVCB(hfsmp)->blockSize,
+				(HFSTOVCB(hfsmp)->totalBlocks / 100) * HFS_NEARLOWDISKTRIGGERFRACTION);
 		hfsmp->hfs_freespace_notify_desiredlevel =
 			MIN(HFS_LOWDISKSHUTOFFLEVEL / HFSTOVCB(hfsmp)->blockSize,
 				(HFSTOVCB(hfsmp)->totalBlocks / 100) * HFS_LOWDISKSHUTOFFFRACTION);
@@ -1904,10 +1907,11 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 		/*
 		 * Set the free space warning levels for the root volume:
 		 *
-		 * Set the "danger" limit to 5% of the volume size or 512MB, whichever
-		 * is less.  Set the "warning" limit to 10% of the volume size or 1GB,
-		 * whichever is less.  And last, set the "desired" freespace level to
-		 * to 11% of the volume size or 1.25GB, whichever is less.
+		 * Set the "danger" limit to 5% of the volume size or 512MB, whichever is less.
+		 * Set the "warning" limit to 10% of the volume size or 1GB, whichever is less.
+		 * Set the "near warning" limit to 10.5% of the volume size or 1.1GB, whichever is less.
+		 * And last, set the "desired" freespace level to to 11% of the volume size or 1.25GB,
+		 * whichever is less.
 		 *
 		 * NOTE: While those are the default limits, KernelEventAgent (as of 3/2016)
 		 * will unilaterally override these to the following on OSX only:
@@ -1921,6 +1925,9 @@ hfs_mountfs(struct vnode *devvp, struct mount *mp, struct hfs_mount_args *args,
 		hfsmp->hfs_freespace_notify_warninglimit =
 			MIN(HFS_ROOTLOWDISKTRIGGERLEVEL / HFSTOVCB(hfsmp)->blockSize,
 				(HFSTOVCB(hfsmp)->totalBlocks / 100) * HFS_ROOTLOWDISKTRIGGERFRACTION);
+		hfsmp->hfs_freespace_notify_nearwarninglimit =
+			MIN(HFS_ROOTNEARLOWDISKTRIGGERLEVEL / HFSTOVCB(hfsmp)->blockSize,
+				(HFSTOVCB(hfsmp)->totalBlocks / 100) * HFS_ROOTNEARLOWDISKTRIGGERFRACTION);
 		hfsmp->hfs_freespace_notify_desiredlevel =
 			MIN(HFS_ROOTLOWDISKSHUTOFFLEVEL / HFSTOVCB(hfsmp)->blockSize,
 				(HFSTOVCB(hfsmp)->totalBlocks / 100) * HFS_ROOTLOWDISKSHUTOFFFRACTION);
@@ -4190,22 +4197,31 @@ err_exit:
  * Creates a UUID from a unique "name" in the HFS UUID Name space.
  * See version 3 UUID.
  */
-static void
-hfs_getvoluuid(struct hfsmount *hfsmp, uuid_t result)
+void
+hfs_getvoluuid(struct hfsmount *hfsmp, uuid_t result_uuid)
 {
-	MD5_CTX  md5c;
-	uint8_t  rawUUID[8];
 
-	((uint32_t *)rawUUID)[0] = hfsmp->vcbFndrInfo[6];
-	((uint32_t *)rawUUID)[1] = hfsmp->vcbFndrInfo[7];
+	if (uuid_is_null(hfsmp->hfs_full_uuid)) {
+		uuid_t result;
 
-	MD5Init( &md5c );
-	MD5Update( &md5c, HFS_UUID_NAMESPACE_ID, sizeof( uuid_t ) );
-	MD5Update( &md5c, rawUUID, sizeof (rawUUID) );
-	MD5Final( result, &md5c );
+		MD5_CTX  md5c;
+		uint8_t  rawUUID[8];
 
-	result[6] = 0x30 | ( result[6] & 0x0F );
-	result[8] = 0x80 | ( result[8] & 0x3F );
+		((uint32_t *)rawUUID)[0] = hfsmp->vcbFndrInfo[6];
+		((uint32_t *)rawUUID)[1] = hfsmp->vcbFndrInfo[7];
+
+		MD5Init( &md5c );
+		MD5Update( &md5c, HFS_UUID_NAMESPACE_ID, sizeof( uuid_t ) );
+		MD5Update( &md5c, rawUUID, sizeof (rawUUID) );
+		MD5Final( result, &md5c );
+
+		result[6] = 0x30 | ( result[6] & 0x0F );
+		result[8] = 0x80 | ( result[8] & 0x3F );
+	
+		uuid_copy(hfsmp->hfs_full_uuid, result);
+	}
+	uuid_copy (result_uuid, hfsmp->hfs_full_uuid);
+
 }
 
 /*
@@ -4214,8 +4230,8 @@ hfs_getvoluuid(struct hfsmount *hfsmp, uuid_t result)
 static int
 hfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t context)
 {
-#define HFS_ATTR_FILE_VALIDMASK (ATTR_FILE_VALIDMASK & ~(ATTR_FILE_FILETYPE | ATTR_FILE_FORKCOUNT | ATTR_FILE_FORKLIST))
-#define HFS_ATTR_CMN_VOL_VALIDMASK (ATTR_CMN_VALIDMASK & ~(ATTR_CMN_ACCTIME))
+#define HFS_ATTR_FILE_VALIDMASK (ATTR_FILE_VALIDMASK & ~(ATTR_FILE_FILETYPE | ATTR_FILE_FORKCOUNT | ATTR_FILE_FORKLIST | ATTR_FILE_CLUMPSIZE))
+#define HFS_ATTR_CMN_VOL_VALIDMASK (ATTR_CMN_VALIDMASK & ~(ATTR_CMN_DATA_PROTECT_FLAGS))
 
 	ExtendedVCB *vcb = VFSTOVCB(mp);
 	struct hfsmount *hfsmp = VFSTOHFS(mp);
@@ -4279,6 +4295,12 @@ hfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 #if CONFIG_HFS_DIRLINK
 				VOL_CAP_FMT_DIR_HARDLINKS |
 #endif
+#ifdef VOL_CAP_FMT_DOCUMENT_ID
+				VOL_CAP_FMT_DOCUMENT_ID |
+#endif /* VOL_CAP_FMT_DOCUMENT_ID */
+#ifdef VOL_CAP_FMT_WRITE_GENERATION_COUNT
+				VOL_CAP_FMT_WRITE_GENERATION_COUNT |
+#endif /* VOL_CAP_FMT_WRITE_GENERATION_COUNT */
 				VOL_CAP_FMT_PATH_FROM_ID;
 		}
 #if CONFIG_HFS_STD
@@ -4345,6 +4367,12 @@ hfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 			VOL_CAP_FMT_HIDDEN_FILES |
 			VOL_CAP_FMT_PATH_FROM_ID |
 			VOL_CAP_FMT_DECMPFS_COMPRESSION |
+#ifdef VOL_CAP_FMT_DOCUMENT_ID
+			VOL_CAP_FMT_DOCUMENT_ID |
+#endif /* VOL_CAP_FMT_DOCUMENT_ID */
+#ifdef VOL_CAP_FMT_WRITE_GENERATION_COUNT
+			VOL_CAP_FMT_WRITE_GENERATION_COUNT |
+#endif /* VOL_CAP_FMT_WRITE_GENERATION_COUNT */
 			VOL_CAP_FMT_DIR_HARDLINKS;
 
 		/*
@@ -4385,13 +4413,21 @@ hfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 		vol_attributes_attr_t *attrp = &fsap->f_attributes;
 
         	attrp->validattr.commonattr = HFS_ATTR_CMN_VOL_VALIDMASK;
+#if CONFIG_PROTECT
+        	attrp->validattr.commonattr |= ATTR_CMN_DATA_PROTECT_FLAGS;
+#endif // CONFIG_PROTECT
+
         	attrp->validattr.volattr = ATTR_VOL_VALIDMASK & ~ATTR_VOL_INFO;
         	attrp->validattr.dirattr = ATTR_DIR_VALIDMASK;
         	attrp->validattr.fileattr = HFS_ATTR_FILE_VALIDMASK;
         	attrp->validattr.forkattr = 0;
 
-        	attrp->nativeattr.commonattr = HFS_ATTR_CMN_VOL_VALIDMASK;
-        	attrp->nativeattr.volattr = ATTR_VOL_VALIDMASK & ~ATTR_VOL_INFO;
+		attrp->nativeattr.commonattr = HFS_ATTR_CMN_VOL_VALIDMASK;
+#if CONFIG_PROTECT
+		attrp->nativeattr.commonattr |= ATTR_CMN_DATA_PROTECT_FLAGS;
+#endif // CONFIG_PROTECT
+		
+       	attrp->nativeattr.volattr = ATTR_VOL_VALIDMASK & ~ATTR_VOL_INFO;
         	attrp->nativeattr.dirattr = ATTR_DIR_VALIDMASK;
         	attrp->nativeattr.fileattr = HFS_ATTR_FILE_VALIDMASK;
         	attrp->nativeattr.forkattr = 0;
@@ -4403,10 +4439,20 @@ hfs_vfs_getattr(struct mount *mp, struct vfs_attr *fsap, __unused vfs_context_t 
 	fsap->f_modify_time.tv_sec = hfsmp->vcbLsMod;
 	fsap->f_modify_time.tv_nsec = 0;
 	VFSATTR_SET_SUPPORTED(fsap, f_modify_time);
+	// We really don't have volume access time, they should check the root node, fake it up
+	if (VFSATTR_IS_ACTIVE(fsap, f_access_time)) {
+		struct timeval tv;
+
+		microtime(&tv);
+		fsap->f_access_time.tv_sec = tv.tv_sec;
+		fsap->f_access_time.tv_nsec = 0;
+		VFSATTR_SET_SUPPORTED(fsap, f_access_time);
+	}
 
 	fsap->f_backup_time.tv_sec = hfsmp->vcbVolBkUp;
 	fsap->f_backup_time.tv_nsec = 0;
 	VFSATTR_SET_SUPPORTED(fsap, f_backup_time);
+	
 	if (VFSATTR_IS_ACTIVE(fsap, f_fssubtype)) {
 		u_int16_t subtype = 0;
 
