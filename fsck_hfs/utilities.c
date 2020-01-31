@@ -162,7 +162,7 @@ char *
 blockcheck(char *origname)
 {
 	struct stat stslash, stblock, stchar;
-	char *newname, *raw;
+	char *newname, *raw = NULL;
 	int retried = 0;
 
 	hotroot = 0;
@@ -173,6 +173,13 @@ blockcheck(char *origname)
 	}
 	newname = origname;
 retry:
+    if (!strncmp(newname, "/dev/fd/", 8)) {
+        detonator_run = 1;
+        return (origname);
+    } else {
+        detonator_run = 0;
+    }
+    
 	if (stat(newname, &stblock) < 0) {
 		perror(newname);
 		plog("Can't stat %s\n", newname);
@@ -267,6 +274,7 @@ catch(sig)
 
 extern char lflag;           // indicates if we're doing a live fsck (defined in fsck_hfs.c)
 extern char guiControl;      // indicates if we're outputting for the gui (defined in fsck_hfs.c)
+extern char xmlControl; 	 // indicates if we're outputting XML output for GUI / Disk Utility (defined in fsck_hfs.c). 
 
 FILE   *log_file = NULL;
 
@@ -549,29 +557,29 @@ shutdown_logging(void)
 	    }
 
 	    for(i=0; i < 60; i++) {
-		log_file = safely_open_log_file(fname);
-		if (log_file) {
-		    fwrite(in_mem_log, cur_in_mem_log - in_mem_log, 1, log_file);
+            log_file = safely_open_log_file(fname);
+            if (log_file) {
+                fwrite(in_mem_log, cur_in_mem_log - in_mem_log, 1, log_file);
 
-		    fflush(log_file);
-		    fclose(log_file);
-		    log_file = NULL;
+                fflush(log_file);
+                fclose(log_file);
+                log_file = NULL;
 
-		    free(in_mem_log);
-		    in_mem_log = cur_in_mem_log = NULL;
-		    in_mem_log_size = 0;
+                free(in_mem_log);
+                in_mem_log = cur_in_mem_log = NULL;
+                in_mem_log_size = 0;
 
-		    break;
-		} else {
-			// hmmm, failed to open the output file so wait
-			// a while only if the fs is read-only and then 
-			// try again
-			if (errno == EROFS) {
-				sleep(1);
-			} else {
-				break;
-			} 
-		}
+                break;
+            } else {
+                // hmmm, failed to open the output file so wait
+                // a while only if the fs is read-only and then
+                // try again
+                if (errno == EROFS) {
+                    sleep(1);
+                } else {
+                    break;
+                }
+            }
 	    }
 	}
     }
@@ -600,6 +608,11 @@ setup_logging(void)
     if (guiControl) {
 	    setlinebuf(stdout);
 	    setlinebuf(stderr);
+    }
+    
+    if (detonator_run) {
+        // Do not create a log file 
+        return;
     }
 
     // our copy of this variable since we may
@@ -929,17 +942,18 @@ plog(const char *fmt, ...)
 void
 olog(const char *fmt, ...)
 {
-    va_list ap;
-    va_start(ap, fmt);
-    
-    setup_logging();
+	va_list ap;
+	va_start(ap, fmt);
 
-    /* For live fsck_hfs, add output strings to in-memory log, 
-     * and for non-live fsck_hfs, print output to stdout. 
-     */
-    VOUT(stdout, fmt, ap);
+	setup_logging();
 
-    va_end(ap);
+	/* 
+	 * For live fsck_hfs, add output strings to in-memory log, 
+	 * and for non-live fsck_hfs, print output to stdout. 
+	 */
+	VOUT(stdout, fmt, ap);
+
+	va_end(ap);
 }
 
 /* Write to only log file */
@@ -960,40 +974,46 @@ llog(const char *fmt, ...)
 void
 vplog(const char *fmt, va_list ap)
 {
-    va_list copy_ap;
+	va_list copy_ap;
 
-    va_copy(copy_ap, ap);
-    
-    setup_logging();
+	va_copy(copy_ap, ap);
 
-    /* Always print prefix to strings written to log files */
-    need_prefix = 1;
+	setup_logging();
 
-    /* Handle output strings, print to stdout or store in-memory */
-    VOUT(stdout, fmt, ap);
-	
-    /* Add log strings to the log file.  VLOG() handles live case internally */
-    VLOG_INTERNAL(fmt, copy_ap);
+	/* Always print prefix to strings written to log files */
+	need_prefix = 1;
+
+	/* Handle output strings, print to stdout or store in-memory, if not running in XML mode */
+	if (xmlControl == 0) {
+		/*
+		 * If running in XML mode do not put non-XML formatted output into stdout, as it may cause
+		 * DiskMgmt to complain. 
+		 */ 
+		VOUT(stdout, fmt, ap);
+	}
+
+	/* Add log strings to the log file.  VLOG() handles live case internally */
+	VLOG_INTERNAL(fmt, copy_ap);
 }
 
-/* Write to both standard out and log file */
+/* Write to both the given stream (usually stderr!) and log file */
 void
 fplog(FILE *stream, const char *fmt, ...)
 {
-    va_list ap, copy_ap;
-    va_start(ap, fmt);
-    va_copy(copy_ap, ap);
-    
-    setup_logging();
-    need_prefix = 1;
+	va_list ap, copy_ap;
+	va_start(ap, fmt);
+	va_copy(copy_ap, ap);
 
-    /* Handle output strings, print to given stream or store in-memory */
-    VOUT(stream, fmt, ap);
-	
-    /* Add log strings to the log file.  VLOG() handles live case internally */
-    VLOG(fmt, copy_ap);
+	setup_logging();
+	need_prefix = 1;
 
-    va_end(ap);
+	/* Handle output strings, print to given stream or store in-memory */
+	VOUT(stream, fmt, ap);
+
+	/* Add log strings to the log file.  VLOG() handles live case internally */
+	VLOG(fmt, copy_ap);
+
+	va_end(ap);
 }
 
 #define kProgressToggle	"kern.progressmeterenable"
