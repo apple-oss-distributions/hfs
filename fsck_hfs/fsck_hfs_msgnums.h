@@ -152,8 +152,8 @@ enum {
         E_HsFldCount            =  581, /* HasFolderCount flag needs to be set */
         E_BadPermPrivDir        =  582, /* Incorrect permissions for private directory for directory hard links */
         E_DirInodeBadFlags      =  583, /* Incorrect flags for directory inode */
-        E_DirInodeBadParent     = -584, /* Invalid parent for directory inode */
-        E_DirInodeBadName       = -585, /* Invalid name for directory inode */
+        E_DirInodeBadParent     =  584, /* Invalid parent for directory inode */
+        E_DirInodeBadName       =  585, /* Invalid name for directory inode */
         E_DirHardLinkChain      =  586, /* Incorrect number of directory hard link count */
         E_DirHardLinkOwnerFlags =  587, /* Incorrect owner flags for directory hard link */
         E_DirHardLinkFinderInfo =  588, /* Invalid finder info for directory hard link */
@@ -165,7 +165,7 @@ enum {
         E_InvalidLinkChainPrev  =  593, /* Previous ID in a hard lnk chain is incorrect */
         E_InvalidLinkChainNext  =  594, /* Next ID in a hard link chain is incorrect */
         E_FileInodeBadFlags     =  595, /* Incorrecgt flags for file inode */
-        E_FileInodeBadParent    = -596, /* Invalid parent for file inode */
+        E_FileInodeBadParent    =  596, /* Invalid parent for file inode */
         E_FileInodeBadName      = -597, /* Invalid name for file inode */
         E_FileHardLinkChain     =  598, /* Incorrect number of file hard link count */
         E_FileHardLinkFinderInfo=  599, /* Invalid finder info for file hard link */
