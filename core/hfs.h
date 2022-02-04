@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2000-2020 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
  * 
@@ -159,6 +159,48 @@ extern struct timezone gTimeZone;
 
 /* Internal Data structures*/
 
+#define NEW_XATTR TARGET_CPU_ARM64
+
+#if NEW_XATTR
+
+// number of concurrent xattr IOs permitted
+#define XATTR_NUM_FEXTS 64u
+// bitmap size, in 64bit words, used to track concurrent xattr IOs
+#define XATTR_BM_SIZE ((XATTR_NUM_FEXTS) / (NBBY * sizeof(uint64_t)))
+
+/*
+ * State for all stream based xattr IO on a volume.
+ *
+ * Fixed size thread local storage for use across the IO stack.
+ *
+ * Fields:
+ * - lock
+ *   A spin lock used to access both the free file extent bitmap, `free_bm',
+ *   and the xattr file extents themselves, `xattr_fexts'.
+ * - free_bm
+ *   This bitmap represents the unused indices of `xattr_fexts'. The name is
+ *   somewhat backwards: set bits (with a value of one) denote *used* indices.
+ * - xattr_fexts
+ *   These are references to xattr file extents used as thread local storage to
+ *   communicate from top level xattr IO functions, through the cluster layer,
+ *   down into lower level IO functions (hfs_vnop_blockmap()).
+ *   Each index which contains a non-NULL fext should have its corresponding
+ *   bit within `free_bm' set. Though the reverse is not strictly true: a bit
+ *   within the bitmap may be set before the corresponding fext is. This is
+ *   the case when memory for a file extent reference is preallocated before
+ *   the value of the file extent is available.
+ *   This is an array of pointers rather than an array of file extents because:
+ *   - it avoids both copying a full fext into and out from the array
+ *   - it prints more nicely in lldb
+ */
+typedef struct {
+	lck_spin_t lock;
+	uint64_t free_bm[XATTR_BM_SIZE];
+	const HFSPlusExtentDescriptor *xattr_fexts[XATTR_NUM_FEXTS];
+} xattr_io_info_t;
+
+#endif
+
 /* This structure describes the HFS specific mount structure data. */
 typedef struct hfsmount {
 	u_int32_t     hfs_flags;              /* see below */
@@ -191,6 +233,9 @@ typedef struct hfsmount {
 	struct vnode *		hfs_attribute_vp;
 	struct vnode *		hfs_startup_vp;
 	struct vnode *		hfs_attrdata_vp;   /* pseudo file */
+#if NEW_XATTR
+	xattr_io_info_t		hfs_xattr_io;   /* Note, this is a big structure ~(64 * 8 bytes) */
+#endif
 	struct cnode *		hfs_extents_cp;
 	struct cnode *		hfs_catalog_cp;
 	struct cnode *		hfs_allocation_cp;
@@ -282,10 +327,6 @@ typedef struct hfsmount {
 	struct cat_attr     hfs_private_attr[2];
 
 	u_int32_t		hfs_metadata_createdate;
-#if CONFIG_HFS_STD
-	hfs_to_unicode_func_t	hfs_get_unicode;
-	unicode_to_hfs_func_t	hfs_get_hfsname;
-#endif
  
 	/* Quota variables: */
 	struct quotafile	hfs_qfiles[MAXQUOTAS];    /* quota files */
@@ -871,10 +912,6 @@ u_int32_t BestBlockSizeFit(u_int32_t allocationBlockSize,
                                u_int32_t blockSizeLimit,
                                u_int32_t baseMultiple);
 
-#if CONFIG_HFS_STD
-OSErr	hfs_MountHFSVolume(struct hfsmount *hfsmp, HFSMasterDirectoryBlock *mdb,
-		struct proc *p);
-#endif
 OSErr	hfs_MountHFSPlusVolume(struct hfsmount *hfsmp, HFSPlusVolumeHeader *vhp,
 		off_t embeddedOffset, u_int64_t disksize, struct proc *p, void *args, kauth_cred_t cred);
 
@@ -978,14 +1015,6 @@ void hfs_close_jvp(hfsmount_t *hfsmp);
 
 // Return a heap address suitable for logging or tracing
 uintptr_t obfuscate_addr(void *addr);
-
-#if CONFIG_HFS_STD
-int hfs_to_utf8(ExtendedVCB *vcb, const Str31 hfs_str, ByteCount maxDstLen,
-				ByteCount *actualDstLen, unsigned char* dstStr);
-int utf8_to_hfs(ExtendedVCB *vcb, ByteCount srcLen, const unsigned char* srcStr,
-				Str31 dstStr);
-int unicode_to_hfs(ExtendedVCB *vcb, ByteCount srcLen, u_int16_t* srcStr, Str31 dstStr, int retry);
-#endif
 
 void *hfs_malloc(size_t size);
 void hfs_free(void *ptr, size_t size);
@@ -1139,6 +1168,11 @@ extern int hfs_isrbtree_active (struct hfsmount *hfsmp);
  ******************************************************************************/
 extern errno_t hfs_get_fsinfo(struct hfsmount *hfsmp, void *a_data);
 extern void hfs_fsinfo_data_add(struct hfs_fsinfo_data *fsinfo, uint64_t entry);
+
+#if NEW_XATTR
+bool hfs_xattr_fext_find(xattr_io_info_t *info, uint32_t fs_bsize,
+		uint64_t off, HFSPlusExtentDescriptor *out, uint64_t *off_out);
+#endif
 
 struct hfs_sysctl_chain {
 	struct sysctl_oid *oid;
