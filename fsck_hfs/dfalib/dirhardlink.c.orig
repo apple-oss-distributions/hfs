@@ -208,88 +208,32 @@ int record_inode_badflags(SGlobPtr gptr, uint32_t inode_id, Boolean isdir,
 }
 
 /* Record minor repair order for invalid parent of directory/file inode */
+/* XXX -- not repaired yet (file or directory) */
 static int record_inode_badparent(SGlobPtr gptr, uint32_t inode_id, Boolean isdir,
-		uint32_t incorrect, uint32_t correct, HFSUniStr255 *name)
+		uint32_t incorrect, uint32_t correct)
 {
-	RepairOrderPtr p;
 	char str1[12];
 	char str2[12];
 
-	p = AllocMinorRepairOrder(gptr, sizeof(HFSUniStr255));
-	if (p == NULL) {
-		return ENOMEM;
-	}
+	fsckPrint(gptr->context, isdir? E_DirInodeBadParent : E_FileInodeBadParent, inode_id);
+	snprintf(str1, sizeof(str1), "%u", correct);
+	snprintf(str2, sizeof(str2), "%u", incorrect);
+	fsckPrint(gptr->context, E_BadValue, str1, str2);
 
-	p->type = isdir ? E_DirInodeBadParent : E_FileInodeBadParent;
-	p->correct = correct;
-	p->incorrect = incorrect;
-	p->parid = inode_id;
-	memcpy(p->name, name, sizeof(HFSUniStr255));
-
-	gptr->CatStat |= S_LinkErrRepair;
-
-	if ( IsDuplicateRepairOrder(gptr, p) == 1 ) {
-		DeleteRepairOrder(gptr, p);
-	} else {
-		fsckPrint(gptr->context, p->type, inode_id);
-		snprintf(str1, sizeof(str1), "%u", correct);
-		snprintf(str2, sizeof(str2), "%u", incorrect);
-		fsckPrint(gptr->context, E_BadValue, str1, str2);
-	}
+	gptr->CatStat |= S_LinkErrNoRepair;
 
 	return 0;
 }
 
 /* Record minor repair order for invalid name of directory inode */
+/* XXX - not repaired yet (file or directory) */
 static int record_inode_badname(SGlobPtr gptr, uint32_t inode_id,
-		Boolean isdir, char *incorrect, char *correct)
+		char *incorrect, char *correct)
 {
-	RepairOrderPtr p;
-	size_t *sizeptr;
-	char *charptr;
+	fsckPrint(gptr->context, E_DirInodeBadName, inode_id);
+	fsckPrint(gptr->context, E_BadValue, correct, incorrect);
 
-	p = AllocMinorRepairOrder(gptr, sizeof(size_t) + strlen(incorrect) + 1 + strlen(correct) + 1);
-	if (p == NULL) {
-		return ENOMEM;
-	}
-
-	p->type = isdir ? E_DirInodeBadName : E_FileInodeBadName;
-	p->parid = inode_id;
-
-	// Store names: len(incorrect), incorrect, \0, correct, \0
-	sizeptr = (size_t *)p->name;
-	*sizeptr = strlen(incorrect);
-	charptr = p->name + sizeof(size_t);
-	charptr = stpcpy(charptr, incorrect) + 1;
-	strcpy(charptr, correct);
-
-	gptr->CatStat |= S_LinkErrRepair;
-
-	if ( IsDuplicateRepairOrder(gptr, p) == 1 ) {
-		DeleteRepairOrder(gptr, p);
-	} else {
-		fsckPrint(gptr->context, p->type, inode_id);
-		fsckPrint(gptr->context, E_BadValue, correct, incorrect);
-	}
-
-	return 0;
-}
-
-/* Record minor repair order for orphaned inode */
-static int record_orphan_inode(SGlobPtr gptr, uint32_t inode_id, Boolean isdir)
-{
-	RepairOrderPtr p;
-
-	fsckPrint(gptr->context, isdir ? E_OrphanDirInode : E_OrphanFileInode, inode_id);
-
-	p = AllocMinorRepairOrder(gptr, 0);
-	if (p == NULL)
-		return ENOMEM;
-
-	p->type = isdir ? E_OrphanDirInode : E_OrphanFileInode;
-	p->parid = inode_id;
-
-	gptr->CatStat |= S_LinkErrRepair;
+	gptr->CatStat |= S_LinkErrNoRepair;
 
 	return 0;
 }
@@ -698,7 +642,7 @@ int inode_check(SGlobPtr gptr, PrimeBuckets *bucket,
 
 	/* inode should only reside in its corresponding private directory */
 	if ((parentid != 0) && (key->hfsPlus.parentID != parentid)) {
-		(void) record_inode_badparent(gptr, inode_id, isdir, key->hfsPlus.parentID, parentid, &key->hfsPlus.nodeName);
+		(void) record_inode_badparent(gptr, inode_id, isdir, key->hfsPlus.parentID, parentid);
 	}
 
 	/* Compare the names for directory inode only because the names 
@@ -710,24 +654,14 @@ int inode_check(SGlobPtr gptr, PrimeBuckets *bucket,
 	
 		if ((found_len != calc_len) ||
 		    (strncmp(calc_name, found_name, calc_len) != 0)) {
-
-			(void) record_inode_badname(gptr, inode_id, isdir, found_name, calc_name);
-
-			/* Inodes in the "pending delete" state (that were deleted
-			 * while open but the filesystem was ejected before they could
-			 * get removed) will simply be deleted.
-			 * All others will be moved to lost+found (and the other
-			 * properties will be checked in the next recheck).
-			 * So we bail out for now.
-			 */
-			retval = 0;
-			goto out;
+			(void) record_inode_badname(gptr, inode_id, found_name,
+					calc_name);
 		}
 	}
 
 	/* At least one hard link should always point at an inode. */
 	if (linkCount == 0) {
-		record_orphan_inode(gptr, inode_id, isdir);
+		record_link_badchain(gptr, isdir);
 		if (fsckGetVerbosity(gptr->context) >= kDebugLog) {
 			plog ("\tlinkCount=0 for dirinode=%u\n", inode_id);
 		}
