@@ -1334,18 +1334,18 @@ do_bulk_access_check(struct hfsmount *hfsmp, struct vnode *vp,
 	goto err_exit_bulk_access;
     }
 		
-    file_ids = hfs_malloc(sizeof(int) * num_files);
-    access = hfs_malloc(sizeof(short) * num_files);
+    file_ids = hfs_new_data(int, num_files);
+    access = hfs_new_data(short, num_files);
     if (map_size) {
-		bitmap = hfs_mallocz(sizeof(char) * map_size);
+		bitmap = hfs_new_zero_data(char, map_size);
     }
 
     if (num_parents) {
-		parents = hfs_malloc(sizeof(cnid_t) * num_parents);
+		parents = hfs_new_data(cnid_t, num_parents);
     }
 
-    cache.acache = hfs_malloc(sizeof(int) * NUM_CACHE_ENTRIES);
-    cache.haveaccess = hfs_malloc(sizeof(unsigned char) * NUM_CACHE_ENTRIES);
+    cache.acache = hfs_new_data(unsigned int, NUM_CACHE_ENTRIES);
+    cache.haveaccess = hfs_new_data(unsigned char, NUM_CACHE_ENTRIES);
 
     if ((error = copyin(user_access_structp->file_ids, (caddr_t)file_ids,
 		num_files * sizeof(int)))) {
@@ -1471,12 +1471,12 @@ do_bulk_access_check(struct hfsmount *hfsmp, struct vnode *vp,
 		
   err_exit_bulk_access:
 		
-	hfs_free(file_ids, sizeof(int) * num_files);
-	hfs_free(parents, sizeof(cnid_t) * num_parents);
-	hfs_free(bitmap, sizeof(char) * map_size);
-	hfs_free(access, sizeof(short) * num_files);
-	hfs_free(cache.acache, sizeof(int) * NUM_CACHE_ENTRIES);
-	hfs_free(cache.haveaccess, sizeof(unsigned char) * NUM_CACHE_ENTRIES);
+	hfs_delete_data(file_ids, int, num_files);
+	hfs_delete_data(parents, cnid_t, num_parents);
+	hfs_delete_data(bitmap, char, map_size);
+	hfs_delete_data(access, short, num_files);
+	hfs_delete_data(cache.acache, unsigned int, NUM_CACHE_ENTRIES);
+	hfs_delete_data(cache.haveaccess, unsigned char, NUM_CACHE_ENTRIES);
 		
     return (error);
 }
@@ -1484,6 +1484,171 @@ do_bulk_access_check(struct hfsmount *hfsmp, struct vnode *vp,
 
 /* end "bulk-access" support */
 
+
+static int
+hfs_cas_bsdflags(struct hfsmount *hfsmp, struct vnode *vp,
+    struct vnop_ioctl_args *ap)
+{
+	struct fsioc_cas_bsdflags *cas = (void *)ap->a_data;
+	struct cnode *cp = VTOC(vp);
+	u_int32_t document_id = 0;
+	bool unlock_truncate = false, unlock_cp = false;
+	int decmpfs_reset_state = 0;
+	int error;
+
+	if (hfsmp->hfs_flags & HFS_READ_ONLY) {
+		return (EROFS);
+	}
+
+	/* Don't allow modification of the journal. */
+	if (hfs_is_journal_file(hfsmp, cp)) {
+		return (EPERM);
+	}
+
+	//
+	// Since we will perform operations that are difficult or wasteful
+	// to unwind, perform an up-front check of the flags.
+	//
+	if ((error = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+		return (error);
+	}
+
+	// Make sure that flags are as expected.
+	cas->actual_flags = cp->c_bsdflags;
+	hfs_unlock(cp);
+
+	if (cas->actual_flags != cas->expected_flags) {
+		return (0);
+	}
+
+	//
+	// Check if we'll need a new document id.
+	//
+	if ((cas->new_flags & UF_TRACKED) && !(cp->c_bsdflags & UF_TRACKED)) {
+		// Following hfs_vnop_getattr(), we can obtain this safely
+		// without holding any cnode lock.
+		document_id = hfs_get_document_id(cp);
+
+		//
+		// If the document_id is not set, get a new one.  It will be set
+		// on the file down below once we hold the cnode lock.
+		//
+		if (document_id == 0) {
+			if (hfs_generate_document_id(hfsmp, &document_id) != 0) {
+				document_id = 0;
+			}
+		}
+	}
+
+	//
+	// Check if we need to set UF_COMPRESSED.
+	// If so, ask decmpfs if we're allowed to (and if so, if we need to truncate
+	// the data fork to 0 - taking the lock here).
+	//
+	if (!(cas->expected_flags & UF_COMPRESSED) && (cas->new_flags & UF_COMPRESSED)) {
+		struct vnode_attr vap;
+		VATTR_INIT(&vap);
+		VATTR_SET(&vap, va_flags, cas->new_flags);
+
+		error = decmpfs_update_attributes(vp, &vap);
+		if (error) {
+			return (error);
+		}
+
+		//
+		// Similar to hfs_vnop_setattr(), we call decmpfs_update_attributes()
+		// as it is the ultimate arbiter of whether or not UF_COMPRESSED can be set.
+		// (If the decmpfs xattr is not present or invalid, for example,
+		// UF_COMPRESSED should *not* be set.)
+		// It will also tell us if we need to truncate the data fork to 0.
+		//
+		if (!(vap.va_flags & UF_COMPRESSED)) {
+			// The request to update UF_COMPRESSED is denied.
+			// (Note that decmpfs_update_attributes() won't touch va_active
+			// in this case.) Error out.
+			return (EPERM);
+		}
+
+		if (VATTR_IS_ACTIVE(&vap, va_data_size) && (vap.va_data_size == 0)
+			&& (VTOF(vp)->ff_size)) {
+			// We must also truncate this file's data fork to 0.
+			hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
+			unlock_truncate = true;
+		}
+	}
+	// From this point on, locks must be dropped before returning.
+
+	if ((error = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
+		goto out_unlock;
+	}
+	unlock_cp = true;
+
+	// Make sure that flags are as expected.
+	cas->actual_flags = cp->c_bsdflags;
+	if (cas->actual_flags != cas->expected_flags) {
+		goto out_unlock;
+	}
+
+	// Attempt to truncate our data fork to 0 length if necessary,
+	// and drop the truncate lock.
+	if (unlock_truncate) {
+		error = hfs_truncate(vp, 0, IO_NDELAY, 0, ap->a_context);
+		hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
+		unlock_truncate = false; // so we don't unlock it below
+
+		if (error) {
+			goto out_unlock;
+		}
+	}
+
+	// Set the BSD flags (setting decmpfs_reset_state upon success).
+	error = hfs_set_bsd_flags(hfsmp, cp, cas->new_flags,
+							  document_id, ap->a_context,
+							  &decmpfs_reset_state);
+	if (error) {
+		goto out_unlock;
+	}
+
+	error = hfs_update(vp, 0);
+
+out_unlock:
+	if (unlock_truncate) {
+		hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
+	}
+
+	if (unlock_cp) {
+		hfs_unlock(cp);
+	}
+
+	if (error) {
+		return (error);
+	}
+
+#if HFS_COMPRESSION
+	if (decmpfs_reset_state) {
+		/*
+		 * we've changed the UF_COMPRESSED flag, so reset the decmpfs state for this cnode
+		 * but don't do it while holding the hfs cnode lock
+		 */
+		decmpfs_cnode *dp = VTOCMP(vp);
+		if (!dp) {
+			/*
+			 * call hfs_lazy_init_decmpfs_cnode() to make sure that the decmpfs_cnode
+			 * is filled in; we need a decmpfs_cnode to prevent decmpfs state changes
+			 * on this file if it's locked
+			 */
+			dp = hfs_lazy_init_decmpfs_cnode(VTOC(vp));
+			if (!dp) {
+				/* failed to allocate a decmpfs_cnode */
+				return ENOMEM; /* what should this be? */
+			}
+		}
+		decmpfs_cnode_set_vnode_state(dp, FILE_TYPE_UNKNOWN, 0);
+	}
+#endif
+
+	return 0;
+}
 
 /*
  * Control filesystem operating characteristics.
@@ -2904,144 +3069,8 @@ fail_change_next_allocation:
 		return hfs_pin_vnode(hfsmp, vp, HFS_PIN_IT | HFS_DATALESS_PIN,
 							 NULL);
 
-	case FSIOC_CAS_BSDFLAGS: {
-		struct fsioc_cas_bsdflags *cas = (void *)ap->a_data;
-		struct cnode *cp = VTOC(vp);
-		u_int32_t document_id = 0;
-		bool need_truncate = false;
-		int decmpfs_reset_state = 0;
-		int error;
-
-		if (hfsmp->hfs_flags & HFS_READ_ONLY) {
-			return (EROFS);
-		}
-
-		/* Don't allow modification of the journal. */
-		if (hfs_is_journal_file(hfsmp, cp)) {
-			return (EPERM);
-		}
-
-		// Check if we need to set UF_COMPRESSED.
-		// If so, ask decmpfs if we're allowed to (and if so, if we need to truncate
-		// the data fork to 0).
-		if (!(cas->expected_flags & UF_COMPRESSED) && (cas->new_flags & UF_COMPRESSED)) {
-			struct vnode_attr vap;
-			VATTR_INIT(&vap);
-			VATTR_SET(&vap, va_flags, cas->new_flags);
-
-			error = decmpfs_update_attributes(vp, &vap);
-			if (error) {
-				return (error);
-			}
-
-			// Similar to hfs_vnop_setattr(), we call decmpfs_update_attributes()
-			// as it is the ultimate arbiter of whether or not UF_COMPRESSED can be set.
-			// (If the decmpfs xattr is not present or invalid, for example,
-			// UF_COMPRESSED should *not* be set.)
-			// It will also tell us if we need to truncate the data fork to 0.
-			if (!(vap.va_flags & UF_COMPRESSED)) {
-				// The request to update UF_COMPRESSED is denied.
-				// (Note that decmpfs_update_attributes() won't touch va_active
-				// in this case.) Error out.
-				return (EPERM);
-			}
-
-			if (VATTR_IS_ACTIVE(&vap, va_data_size) && (vap.va_data_size == 0)) {
-				// We must also truncate this file's data fork to 0.
-				need_truncate = true;
-			}
-		}
-
-		if ((error = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
-			return (error);
-		}
-
-		cas->actual_flags = cp->c_bsdflags;
-		if (cas->actual_flags != cas->expected_flags) {
-			hfs_unlock(cp);
-			return (0);
-		}
-
-		//
-		// Check if we'll need a document_id.  If so, we need to drop the lock
-		// (to avoid any possible deadlock with the root vnode which has to get
-		// locked to get the document id), generate the document_id, re-acquire
-		// the lock, and perform the CAS check again.  We do it in this sequence
-		// in order to avoid throwing away document_ids in the case where the
-		// CAS check fails.  Note that it can still happen, but by performing
-		// the check first, hopefully we can reduce the ocurrence.
-		//
-		if ((cas->new_flags & UF_TRACKED) && !(VTOC(vp)->c_bsdflags & UF_TRACKED)) {
-			struct FndrExtendedDirInfo *fip = (struct FndrExtendedDirInfo *)((char *)&(VTOC(vp)->c_attr.ca_finderinfo) + 16);
-			//
-			// If the document_id is not set, get a new one.  It will be set
-			// on the file down below once we hold the cnode lock.
-			//
-			if (fip->document_id == 0) {
-				//
-				// Drat, we have to generate one.  Unlock the cnode, do the
-				// deed, re-lock the cnode, and then to the CAS check again
-				// to see if we lost the race.
-				//
-				hfs_unlock(cp);
-				if (hfs_generate_document_id(hfsmp, &document_id) != 0) {
-					document_id = 0;
-				}
-				if ((error = hfs_lock(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT))) {
-					return (error);
-				}
-				cas->actual_flags = cp->c_bsdflags;
-				if (cas->actual_flags != cas->expected_flags) {
-					hfs_unlock(cp);
-					return (0);
-				}
-			}
-		}
-
-		// Attempt to truncate our data fork to 0 length, if necessary.
-		if (need_truncate && (VTOF(vp)->ff_size)) {
-			hfs_lock_truncate(cp, HFS_EXCLUSIVE_LOCK, HFS_LOCK_DEFAULT);
-			// hfs_truncate will deal with the cnode lock
-			error = hfs_truncate(vp, 0, IO_NDELAY, 0, ap->a_context);
-			hfs_unlock_truncate(cp, HFS_LOCK_DEFAULT);
-		}
-
-		if (!error)
-			error = hfs_set_bsd_flags(hfsmp, cp, cas->new_flags,
-								  document_id, ap->a_context,
-								  &decmpfs_reset_state);
-		if (error == 0) {
-			error = hfs_update(vp, 0);
-		}
-		hfs_unlock(cp);
-		if (error) {
-			return (error);
-		}
-
-#if HFS_COMPRESSION
-		if (decmpfs_reset_state) {
-			/*
-			 * we've changed the UF_COMPRESSED flag, so reset the decmpfs state for this cnode
-			 * but don't do it while holding the hfs cnode lock
-			 */
-			decmpfs_cnode *dp = VTOCMP(vp);
-			if (!dp) {
-				/*
-				 * call hfs_lazy_init_decmpfs_cnode() to make sure that the decmpfs_cnode
-				 * is filled in; we need a decmpfs_cnode to prevent decmpfs state changes
-				 * on this file if it's locked
-				 */
-				dp = hfs_lazy_init_decmpfs_cnode(VTOC(vp));
-				if (!dp) {
-					/* failed to allocate a decmpfs_cnode */
-					return ENOMEM; /* what should this be? */
-				}
-			}
-			decmpfs_cnode_set_vnode_state(dp, FILE_TYPE_UNKNOWN, 0);
-		}
-#endif
-		break; // return 0 below
-	}
+	case FSIOC_CAS_BSDFLAGS:
+		return hfs_cas_bsdflags(hfsmp, vp, ap);
 
 	default:
 		return (ENOTTY);
@@ -4217,7 +4246,7 @@ hfs_truncate(struct vnode *vp, off_t length, int flags,
 	}
 
 	if (vnode_islnk(vp) && cp->c_datafork->ff_symlinkptr) {
-		hfs_free(cp->c_datafork->ff_symlinkptr, cp->c_datafork->ff_size);
+		hfs_free_data(cp->c_datafork->ff_symlinkptr, cp->c_datafork->ff_size);
 		cp->c_datafork->ff_symlinkptr = NULL;
 	}
 
@@ -5693,8 +5722,7 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 	}
 #endif /* CONFIG_PROTECT */
 
-    bufp = hfs_malloc(bufsize);
-
+	bufp = hfs_malloc_data(bufsize);
 	auio = uio_create(1, 0, UIO_SYSSPACE, UIO_READ);
 
 	while (offset < copysize) {
@@ -5752,7 +5780,7 @@ hfs_clonefile(struct vnode *vp, int blkstart, int blkcnt, int blksize)
 		 * boundary in the file.
 		 */
 	}
-    hfs_free(bufp, bufsize);
+	hfs_free_data(bufp, bufsize);
 
 	hfs_lock(VTOC(vp), HFS_EXCLUSIVE_LOCK, HFS_LOCK_ALLOW_NOEXISTS);	
 	return (error);
@@ -5784,8 +5812,7 @@ hfs_clonesysfile(struct vnode *vp, int blkstart, int blkcnt, int blksize,
 	bufsize = MIN(blkcnt * blksize, 1024 * 1024) & ~(iosize - 1);
 	breadcnt = bufsize / iosize;
 
-    bufp = hfs_malloc(bufsize);
-
+	bufp = hfs_malloc_data(bufsize);
 	start_blk = ((daddr64_t)blkstart * blksize) / iosize;
 	last_blk  = ((daddr64_t)blkcnt * blksize) / iosize;
 	blkno = 0;
@@ -5838,7 +5865,7 @@ out:
 		buf_brelse(bp);
 	}
 
-    hfs_free(bufp, bufsize);
+	hfs_free_data(bufp, bufsize);
 
 	error = hfs_fsync(vp, MNT_WAIT, 0, p);
 
@@ -5876,7 +5903,7 @@ errno_t hfs_flush_invalid_ranges(vnode_t vp)
 		   to a heap buffer. */
 		if (exts == exts_buf && ext_count == max_exts) {
 			max_exts = 256;
-			exts = hfs_malloc(sizeof(struct ext) * max_exts);
+			exts = hfs_malloc_data(sizeof(struct ext) * max_exts);
 			memcpy(exts, exts_buf, ext_count * sizeof(struct ext));
 		}
 
@@ -5926,7 +5953,7 @@ errno_t hfs_flush_invalid_ranges(vnode_t vp)
 exit:
 
 	if (exts != exts_buf)
-		hfs_free(exts, sizeof(struct ext) * max_exts);
+		hfs_free_data(exts, sizeof(struct ext) * max_exts);
 
 	return ret;
 }
