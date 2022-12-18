@@ -33,7 +33,6 @@
 
 #include "Scavenger.h"
 #include <unistd.h>
-#include <inttypes.h>
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <stddef.h>
@@ -120,6 +119,7 @@ static 	int		BuildFolderRec( SGlob*, u_int16_t theMode, UInt32 theObjID, Boolean
 static 	int		BuildThreadRec( CatalogKey * theKeyPtr, CatalogRecord * theRecPtr, Boolean isHFSPlus, Boolean isDirectory );
 static 	int 	BuildFileRec(UInt16 fileType, UInt16 fileMode, UInt32 fileID, Boolean isHFSPlus, CatalogRecord *catRecord);
 static 	void 	BuildAttributeKey(u_int32_t fileID, u_int32_t startBlock, unsigned char *attrName, u_int16_t attrNameLen, HFSPlusAttrKey *key);
+
 
 OSErr	RepairVolume( SGlobPtr GPtr )
 {
@@ -986,7 +986,7 @@ OSErr FixFileHardLinkFlag(SGlobPtr GPtr, RepairOrderPtr p)
 Routine:	FixPrivDirBadPerms - fix the permissions of the directory hard-link private dir
 
 Input:		GPtr		-- pointer to scavenger global data
-			p			-- pointer to a minor repair order
+			p			-- poitner to a minor repair order
 
 Output:		function result:
 				0 -- no error
@@ -1028,223 +1028,6 @@ static OSErr FixPrivDirBadPerms(SGlobPtr GPtr, RepairOrderPtr p)
 done:
 	return retval;
 }
-
-/*
-Routine:	FixBadParentInode - move inode file/folder to metadata directory.
-
-Input:		GPtr		-- pointer to scavenger global data
-			p			-- pointer to a minor repair order
-
-Output:		function result:
-				0 -- no error
-				n -- error
-*/
-
-static OSErr FixBadParentInode(SGlobPtr GPtr, RepairOrderPtr p)
-{
-	OSErr           retval = noErr;
-	UInt32          hint;
-
-	CatalogName     inodeName;
-
-	CatalogKey      incorrectKey;
-	CatalogKey      correctKey;
-
-	CatalogRecord   currentRecord;
-	uint16_t        currentRecordSize;
-
-	CatalogKey      parentFolderKey;
-	CatalogRecord   parentFolderRecord;
-	uint16_t        parentFolderRecordSize;
-
-	/* This error only happens on HFS+ */
-	if ( !VolumeObjectIsHFSPlus() ) {
-		retval = IntError( GPtr, R_IntErr );
-		goto done;
-	}
-
-	inodeName.ustr = *((HFSUniStr255 *)p->name);
-
-	// Read record data using current (incorrect) key
-	BuildCatalogKey(p->incorrect, &inodeName, true, &incorrectKey);
-	retval = SearchBTreeRecord(GPtr->calculatedCatalogFCB, &incorrectKey, kNoHint, NULL, &currentRecord, &currentRecordSize, NULL);
-	if ( retval != noErr ) {
-		if ( retval == btNotFound ) {
-			retval = 0;
-		}
-		goto done;
-	}
-
-	// We do not want to ever loose the record, so we insert/replace the new one first.
-	BuildCatalogKey(p->correct, &inodeName, true, &correctKey);
-	retval = ReplaceBTreeRecord( GPtr->calculatedCatalogFCB, &correctKey, kNoHint, &currentRecord, currentRecordSize, &hint);
-	if ( retval == btNotFound ) {
-		// Could not replace because it was not there before, so insert it.
-		retval = InsertBTreeRecord( GPtr->calculatedCatalogFCB, &correctKey, &currentRecord, currentRecordSize, &hint);
-	}
-	if ( retval != noErr ) {
-		goto done;
-	}
-
-	// Now we delete the incorrect one.
-	retval = DeleteBTreeRecord( GPtr->calculatedCatalogFCB, &incorrectKey );
-	if ( retval != noErr ) {
-		goto done;
-	}
-
-	/* NOTE: At this point, the valence of one or both of the folders is
-	 *       most likely incorrect. To know which one, one has to count
-	 *       the items in the folders. This is one of the repair steps
-	 *       anyways so it is okay to just ignore this here and let the
-	 *       next repair pass handle it.
-	 */
-	GPtr->minorRepairFalseSuccess = true;
-
-done:
-	if ( retval != noErr ) {
-		if ( fsckGetVerbosity(GPtr->context) >= kDebugLog ) {
-			plog( "\t%s - repair failed for type 0x%02X %d \n", __FUNCTION__, p->type, p->type );
-		}
-	}
-
-	return retval;
-}
-
-/*
-Routine:	FixDirInodeBadName - fix the name of a hard linked folder.
-
-Input:		GPtr		-- pointer to scavenger global data
-			p			-- pointer to a minor repair order
-
-Output:		function result:
-				0 -- no error
-				n -- error
-*/
-
-static OSErr FixDirInodeBadName(SGlobPtr GPtr, RepairOrderPtr p)
-{
-	OSErr				retval = 0;
-
-	SFCB				*fcbPtr;
-	UInt32				hint;
-
-	size_t				*incorrect_len;
-	char				*incorrect;
-	char				*correct;
-
-	CatalogKey			currentKey;
-	CatalogRecord		currentRecord;
-	UInt16				currentRecordSize;
-
-	UInt32				threadID;
-	CatalogKey			threadKey;
-	CatalogRecord		threadRecord;
-	UInt16				threadRecordSize;
-
-	CatalogKey			parentKey;
-	CatalogRecord		parentRecord;
-	UInt16				parentRecordSize;
-
-	UInt32				oldValence;
-	UInt32				oldFolderCount;
-
-
-	/* This error only ever happens on HFS+ */
-	if ( !VolumeObjectIsHFSPlus() ) {
-		goto done;
-	}
-
-	incorrect_len = (size_t *)p->name;
-	incorrect = (char *) p->name + sizeof(size_t);
-	correct = (char *) p->name + sizeof(size_t) + *incorrect_len + 1;
-
-	fcbPtr = GPtr->calculatedCatalogFCB;
-
-	retval = GetCatalogRecordByID( GPtr, (UInt32)p->parid, true, &currentKey, &currentRecord, &currentRecordSize );
-	if ( retval != noErr ) {
-		if ( retval == btNotFound ) {
-			/* If the record was not found this means that the record was
-			 * deleted by an other repair order, return success since this
-			 * means the name is no longer used. Make it a false success
-			 * to be sure.
-			 */
-			GPtr->minorRepairFalseSuccess = true;
-			retval = 0;
-		}
-		goto done;
-	}
-
-	if ( currentRecord.recordType == kHFSPlusFolderRecord ) {
-		threadID = currentRecord.hfsPlusFolder.folderID;
-	} else if ( currentRecord.recordType == kHFSPlusFileRecord ) {
-		threadID = currentRecord.hfsPlusFile.fileID;
-	} else {
-		retval = IntError( GPtr, R_IntErr );
-		goto done;
-	}
-
-	// Is it a deleted link that was open when unmount happened?
-	if (strncmp(incorrect, HFS_DELETE_PREFIX, strlen(HFS_DELETE_PREFIX)) == 0) {
-		retval = DeleteBTreeRecord( fcbPtr, &currentKey );
-		if ( retval != noErr ) {
-			if ( fsckGetVerbosity(GPtr->context) >= kDebugLog ) {
-				plog( "\t%s - failed to delete inode record %" PRIu32 "\n", __FUNCTION__, p->parid );
-			}
-		   goto done;
-		}
-
-		BuildCatalogKey( threadID, NULL, true, &threadKey );
-		retval = SearchBTreeRecord( fcbPtr, &threadKey, kNoHint, NULL, &threadRecord, &threadRecordSize, NULL );
-		if ( retval == noErr ) {
-			retval = DeleteBTreeRecord( fcbPtr, &threadKey );
-			if ( retval != noErr ) {
-				if ( fsckGetVerbosity(GPtr->context) >= kDebugLog ) {
-					plog( "\t%s - failed to delete thread record for folder ID %" PRIu32 "\n", __FUNCTION__, threadID );
-				}
-				goto done;
-			}
-		} else {
-			if ( fsckGetVerbosity(GPtr->context) >= kDebugLog ) {
-				plog( "\t%s - no thread record to delete for folder ID %" PRIu32 "\n", __FUNCTION__, threadID );
-			}
-		}
-
-		retval = GetCatalogRecordByID( GPtr, currentKey.hfsPlus.parentID, true, &parentKey, &parentRecord, &parentRecordSize );
-		if ( retval != noErr ) {
-			goto done;
-		}
-
-		oldValence = parentRecord.hfsPlusFolder.valence;
-		oldFolderCount = parentRecord.hfsPlusFolder.folderCount;
-
-		if ( parentRecord.hfsPlusFolder.valence > 0 ) {
-			parentRecord.hfsPlusFolder.valence--;
-		}
-		if ( currentRecord.recordType == kHFSPlusFolderRecord && (parentRecord.hfsPlusFolder.flags & kHFSHasFolderCountMask) && parentRecord.hfsPlusFolder.folderCount > 0 ) {
-			parentRecord.hfsPlusFolder.folderCount--;
-		}
-
-		if ( (parentRecord.hfsPlusFolder.valence != oldValence) || (parentRecord.hfsPlusFolder.folderCount != oldFolderCount) ) {
-			retval = ReplaceBTreeRecord( GPtr->calculatedCatalogFCB, &parentKey, kNoHint, &parentRecord, parentRecordSize, &hint );
-			if ( retval != noErr ) {
-				goto done;
-			}
-		} else {
-		}
-	} else { // not a pending delete, actually incorrect name, moving to lost+found.
-		retval = FixOrphanInode(GPtr, p);
-		goto done;
-	}
-
-done:
-	if ( retval != noErr ) {
-		if ( fsckGetVerbosity(GPtr->context) >= kDebugLog ) {
-			plog( "\t%s - repair failed for type 0x%02X %d \n", __FUNCTION__, p->type, p->type );
-		}
-	}
-	return retval;
-}
-
 
 /*------------------------------------------------------------------------------
 Routine:	FixOrphanLink
@@ -1735,15 +1518,6 @@ static	OSErr	DoMinorOrders( SGlobPtr GPtr )				//	the globals
 			case E_BadPermPrivDir:
 				err = FixPrivDirBadPerms(GPtr, p);
 				break;
-
-			case E_DirInodeBadParent:
-			case E_FileInodeBadParent:
-				err = FixBadParentInode(GPtr, p);
-				break;
-
-			case E_DirInodeBadName:
-			case E_FileInodeBadName:
-				err = FixDirInodeBadName(GPtr, p);
 
 			case E_InvalidLinkChainFirst:
 				err = FixBadLinkChainFirst(GPtr, p);
