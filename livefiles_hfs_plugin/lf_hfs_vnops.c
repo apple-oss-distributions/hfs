@@ -695,7 +695,7 @@ hfs_removefile(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
     /* Don't allow deleting the journal or journal_info_block. */
     if (VNODE_IS_RSRC(vp) || vnode_issystem(vp) || IsEntryAJnlFile(hfsmp, cp->c_fileid))
     {
-        LFHFS_LOG(LEVEL_ERROR, "hfs_removefile: Removing %s file is not premited\n", VNODE_IS_RSRC(vp) ? "Resource" : (vnode_issystem(vp)? "System" : "Journal"));
+        LFHFS_LOG(LEVEL_ERROR, "hfs_removefile: Removing %s file is not premitted\n", VNODE_IS_RSRC(vp) ? "Resource" : (vnode_issystem(vp)? "System" : "Journal"));
         return (EPERM);
     }
     else
@@ -765,7 +765,7 @@ hfs_removefile(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
     /* Check if this file is being used. */
     if ( !isdir )
     {
-        dataforkbusy = 0; /*vnode_isinuse(vp, 0);*/
+        dataforkbusy = 1; /*vnode_isinuse(vp, 0);*/
         /*
          * At this point, we know that 'vp' points to the
          * a data fork because we checked it up front. And if
@@ -773,7 +773,7 @@ hfs_removefile(struct vnode *dvp, struct vnode *vp, struct componentname *cnp,
          */
         if (rsrc_vp && (cp->c_blocks - VTOF(vp)->ff_blocks))
         {
-            rsrcforkbusy = 0; /*vnode_isinuse(rsrc_vp, 0);*/
+            rsrcforkbusy = 1; /*vnode_isinuse(rsrc_vp, 0);*/
         }
 
         /* Check if we have to break the deletion into multiple pieces. */
@@ -1590,6 +1590,7 @@ int hfs_vnop_setattr( vnode_t vp, const UVFSFileAttributes *attr )
             cp->c_mode = new_mode;
             cp->c_flag |= C_MINOR_MOD;
         }
+        cp->c_touch_chgtime = TRUE;
     }
 
     if ( attr->fa_validmask & UVFS_FA_VALID_BSD_FLAGS )
@@ -2803,11 +2804,6 @@ retry:
         }
 
         tvp_deleted = 1;
-
-        if ( ((VTOC(tvp)->c_flag & C_HARDLINK) ==  0 ) || (VTOC(tvp)->c_linkcount == 0) )
-        {
-            INVALIDATE_NODE(tvp);
-        }
 
         /* Mark 'tcp' as being deleted due to a rename */
         tcp->c_flag |= C_RENAMED;

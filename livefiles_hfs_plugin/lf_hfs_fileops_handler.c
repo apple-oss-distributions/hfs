@@ -329,7 +329,7 @@ int LFHFS_Create ( UVFSFileNode psNode, const char *pcName, const UVFSFileAttrib
         //In case of a failure in setAttr, need to remove the created file
         if (iError)
         {
-            DIROPS_RemoveInternal(psParentVnode, pcName);
+            DIROPS_RemoveInternal(psParentVnode, pcName, *ppsOutNode);
             LFHFS_Reclaim((vnode_t) *ppsOutNode, 0);
         }
     }
@@ -372,7 +372,7 @@ exit:
     return iErr;
 }
 
-int LFHFS_Reclaim ( UVFSFileNode psNode, __unused int flags )
+int LFHFS_Reclaim ( UVFSFileNode psNode, __unused unsigned int flags )
 {
     LFHFS_LOG(LEVEL_DEBUG, "LFHFS_Reclaim\n");
 
@@ -426,6 +426,12 @@ int LFHFS_SymLink ( UVFSFileNode psNode, const char *pcName, const char *psConte
     if (!vnode_isdir(psParentVnode))
     {
         iErr = ENOTDIR;
+        goto exit;
+    }
+
+    if (psContent == NULL)
+    {
+        iErr = EINVAL;
         goto exit;
     }
 
